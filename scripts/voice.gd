@@ -24,6 +24,8 @@ func _ready() -> void:
 		AudioServer.set_bus_send(i, "Master")
 	player = AudioStreamPlayer.new()
 	player.bus = BUS
+	# 网页版 Godot 4.3+ 默认用“采样播放”，运行时新建的 Voice 总线在那条路径下不出声；强制走普通流式播放。
+	player.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
 	add_child(player)
 	apply_settings()
 	_maybe_fetch_pack()
