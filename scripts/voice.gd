@@ -26,6 +26,37 @@ func _ready() -> void:
 	player.bus = BUS
 	add_child(player)
 	apply_settings()
+	_maybe_fetch_pack()
+
+# 轻量网页版（Cloudflare Pages 单文件 ≤25MiB）把配音拆成 voices.pck，启动后在后台下载并挂载；
+# 完整版（音频已在主包里）会直接跳过。下载完成前，台词只是没有声音。
+const PACK_URL := "voices.pck"
+const PACK_LOCAL := "user://voices.pck"
+var pack_loaded := false
+
+func _maybe_fetch_pack() -> void:
+	if not OS.has_feature("web"):
+		return
+	if ResourceLoader.exists("res://audio/voice/grok/pl_grok_bt.ogg"):
+		return
+	var url := str(JavaScriptBridge.eval("new URL('%s', window.location.href).href" % PACK_URL))
+	var req := HTTPRequest.new()
+	req.timeout = 120.0
+	add_child(req)
+	req.request_completed.connect(func(result: int, code: int, _h: PackedStringArray, body: PackedByteArray):
+		if result == HTTPRequest.RESULT_SUCCESS and code == 200:
+			var fa := FileAccess.open(PACK_LOCAL, FileAccess.WRITE)
+			if fa:
+				fa.store_buffer(body)
+				fa.close()
+			pack_loaded = ProjectSettings.load_resource_pack(PACK_LOCAL)
+			print("[Voice] voices.pck loaded: ", pack_loaded, " exists=", ResourceLoader.exists("res://audio/voice/grok/pl_grok_bt.ogg"))
+		else:
+			print("[Voice] voices.pck download failed: ", result, " ", code)
+		req.queue_free())
+	var err := req.request(url)
+	if err != OK:
+		print("[Voice] voices.pck request error: ", err)
 
 func volume() -> float:
 	return clampf(float(Game.s.get("voice_vol", 1.0)), 0.0, 1.0)
