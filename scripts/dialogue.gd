@@ -209,6 +209,10 @@ func _say(line: String) -> void:
 		emote = hp[1]
 	_speaker = who
 	arrow.visible = false
+	if who == "n" or who == "p":
+		Voice.stop()
+	elif not _skip:
+		Voice.say(who, txt)
 	if who == "n":
 		name_chip.visible = false
 		text_lbl.add_theme_color_override("font_color", Color("#5b5778"))
@@ -382,6 +386,7 @@ func _picked(id: String) -> void:
 
 func _end() -> void:
 	_busy = true
+	Voice.stop()
 	var tw := create_tween()
 	tw.tween_property(self, "modulate:a", 0.0, 0.3)
 	tw.tween_callback(func():

@@ -531,6 +531,7 @@ func _start_seclusion(id: String, secs: float) -> void:
 	switch_tab("cultivate")
 	var line: String = Game.pools[id]["med_start"]
 	var d := Data.char_def(id)
+	Voice.say(id, line)
 	show_toast("%s：%s" % [d["name"], line.substr(0, 28)])
 
 func _on_seclusion_done(info: Dictionary) -> void:
@@ -538,6 +539,7 @@ func _on_seclusion_done(info: Dictionary) -> void:
 	var d := Data.char_def(id)
 	var b := VBoxContainer.new()
 	b.add_theme_constant_override("separation", 12)
+	Voice.say(id, Game.pools[id]["med_done"])
 	var t := UI.lbl(Game.pools[id]["med_done"], 28, UI.INK)
 	t.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	t.custom_minimum_size = Vector2(560, 0)
@@ -583,6 +585,7 @@ func show_offline(off: Dictionary) -> void:
 	vb.add_child(UI.lbl("修为 +%s     灵石 +%s" % [Data.fmt(off["xiu"]), Data.fmt(off["stone"])], 30, UI.GOLD_DEEP, true, HORIZONTAL_ALIGNMENT_CENTER))
 	if off.get("letter", "") != "":
 		var who := Data.char_def(off["who"])
+		Voice.say(off["who"], off["letter"])
 		var pc := PanelContainer.new()
 		pc.add_theme_stylebox_override("panel", UI.panel(Color("#fff3d9"), who["color"], 18, 2, false))
 		var lv := VBoxContainer.new()
@@ -606,6 +609,7 @@ func show_daily(dg: Dictionary) -> void:
 	if main_id != "":
 		var d := Data.char_def(main_id)
 		vb.add_child(body_text("%s：「早安！今天也一起好好修行吧。」" % d["name"], 27))
+		Voice.say(main_id, "「早安！今天也一起好好修行吧。」")
 	vb.add_child(UI.lbl("连续登录第 %d 天" % dg["streak"], 26, UI.INK_SOFT, false, HORIZONTAL_ALIGNMENT_CENTER))
 	var rw := "灵石 +%d    灵草 +%d" % [dg["stone"], dg["herb"]]
 	if dg["extra"] != "":
@@ -621,6 +625,33 @@ func open_settings() -> void:
 	vb.add_theme_constant_override("separation", 12)
 	vb.add_child(body_text("栖云居 · 挂机修仙（原型 v0.1）\n角色为 AI 拟人同人设定的 Q 版二次创作。", 24, UI.INK_SOFT))
 	var holder: Array = [null]
+	vb.add_child(UI.lbl("配音音量", 26, UI.INK, true))
+	var vrow := HBoxContainer.new()
+	vrow.add_theme_constant_override("separation", 14)
+	var vs := HSlider.new()
+	vs.min_value = 0.0
+	vs.max_value = 1.0
+	vs.step = 0.05
+	vs.value = Voice.volume()
+	vs.custom_minimum_size = Vector2(330, 50)
+	vs.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	vrow.add_child(vs)
+	var vm := UI.btn("静音" if not Voice.muted() else "取消静音", "ghost", 24, Vector2(170, 56))
+	vrow.add_child(vm)
+	var vpct := UI.lbl("%d%%" % int(round(Voice.volume() * 100.0)), 24, UI.INK_SOFT)
+	vrow.add_child(vpct)
+	vs.value_changed.connect(func(v: float):
+		Voice.set_volume(v)
+		vpct.text = "%d%%" % int(round(v * 100.0)))
+	vs.drag_ended.connect(func(_c: bool):
+		Game.save_game()
+		if Game.s["main"] != "":
+			Voice.play_id("pl_%s_greet" % Game.s["main"]))
+	vm.pressed.connect(func():
+		Voice.set_muted(not Voice.muted())
+		vm.text = "静音" if not Voice.muted() else "取消静音"
+		Game.save_game())
+	vb.add_child(vrow)
 	var sp := UI.btn("试玩加速：×%d（点击切换）" % int(Game.speed), "ghost", 26, Vector2(560, 64))
 	sp.pressed.connect(func():
 		Game.speed = {1.0: 10.0, 10.0: 60.0, 60.0: 1.0}.get(Game.speed, 1.0)

@@ -30,6 +30,8 @@ var title_lbl: Label
 var sub_lbl: Label
 var speech: PanelContainer
 var tap_hint: Label
+var bt_who := ""
+var bt_line := ""
 var _can_close := false
 var _spin := 0.0
 
@@ -136,6 +138,8 @@ func start(r: Dictionary, main_id: String) -> void:
 	# 伙伴的话
 	var who := Data.char_def(main_id)
 	var line: String = Game.pools.get(main_id, {}).get("bt", "") if ok else FAIL_LINES.get(main_id, "")
+	bt_who = main_id
+	bt_line = line
 	speech = PanelContainer.new()
 	speech.position = Vector2(40, 980)
 	speech.size = Vector2(640, 180)
@@ -203,6 +207,7 @@ func _run(ok: bool) -> void:
 	tt.tween_property(title_lbl, "scale", Vector2.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tt.tween_property(sub_lbl, "modulate:a", 1.0, 0.5).set_delay(0.4)
 	tt.tween_property(speech, "modulate:a", 1.0, 0.5).set_delay(0.9)
+	get_tree().create_timer(0.9).timeout.connect(func(): Voice.say(bt_who, bt_line))
 	tt.tween_property(tap_hint, "modulate:a", 1.0, 0.5).set_delay(1.5)
 	await get_tree().create_timer(1.4).timeout
 	_can_close = true

@@ -46,7 +46,7 @@ func _new_state() -> Dictionary:
 		"ver": 1, "xiu": 0.0, "stone": 60.0, "herb": 2, "step": 0, "pity": 0.0,
 		"main": "", "chars": {}, "gifts": {"tea": 1, "flower": 0, "cake": 1, "dew": 0, "scroll": 0},
 		"plots": [], "last_save": Time.get_unix_time_from_system(), "daily_date": "", "streak": 0,
-		"sec": {}, "letters": [], "prologue": false, "seen": [], "notified": [], "stone_frac": 0.0, "fails": 0, "total_bt": 0,
+		"sec": {}, "letters": [], "prologue": false, "seen": [], "notified": [], "stone_frac": 0.0, "fails": 0, "total_bt": 0, "voice_vol": 1.0, "voice_mute": false,
 	}
 	for i in 6:
 		d["plots"].append({"t": 0.0, "g": false})

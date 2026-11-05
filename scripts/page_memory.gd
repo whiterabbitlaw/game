@@ -194,6 +194,11 @@ func _letter_list() -> void:
 		t.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		t.custom_minimum_size = Vector2(480, 0)
 		v.add_child(t)
+		var lwho: String = le["who"]
+		var ltext: String = le["text"]
+		pc.gui_input.connect(func(ev: InputEvent):
+			if ev is InputEventMouseButton and ev.pressed and ev.button_index == MOUSE_BUTTON_LEFT:
+				Voice.say(lwho, ltext))
 		wrap.add_child(pc)
 		list.add_child(wrap)
 	list.add_child(_gap(24))

@@ -156,7 +156,9 @@ func _on_tap() -> void:
 	var id: String = Game.s["main"]
 	main_node.bounce()
 	var pool: Array = Game.pools[id]["poke"]
-	_show_bubble(id, pool[randi() % pool.size()])
+	var pline: String = pool[randi() % pool.size()]
+	_show_bubble(id, pline)
+	Voice.say(id, pline)
 	if Game.daily_left(id, "poke") > 0:
 		Game.use_daily(id, "poke")
 		Game.add_bond(id, 1.0, true)
