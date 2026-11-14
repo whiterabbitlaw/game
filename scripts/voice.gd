@@ -17,15 +17,18 @@ func _ready() -> void:
 		f.close()
 		if typeof(d) == TYPE_DICTIONARY:
 			map = d
+	# Voice 总线必须在 default_bus_layout.tres 里预定义。
+	# 网页版默认走采样播放（Sample）；运行时再建总线，采样路径会静音。
+	# 不再强制 PLAYBACK_TYPE_STREAM（无线程 Web 导出上容易卡顿）。
 	if AudioServer.get_bus_index(BUS) < 0:
+		push_warning("Voice bus missing from default_bus_layout.tres; audio may be silent on web")
 		AudioServer.add_bus()
 		var i := AudioServer.bus_count - 1
 		AudioServer.set_bus_name(i, BUS)
 		AudioServer.set_bus_send(i, "Master")
 	player = AudioStreamPlayer.new()
 	player.bus = BUS
-	# 网页版 Godot 4.3+ 默认用“采样播放”，运行时新建的 Voice 总线在那条路径下不出声；强制走普通流式播放。
-	player.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
+	player.playback_type = AudioServer.PLAYBACK_TYPE_DEFAULT
 	add_child(player)
 	apply_settings()
 	_maybe_fetch_pack()

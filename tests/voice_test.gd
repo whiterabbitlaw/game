@@ -64,4 +64,13 @@ func _initialize() -> void:
 	# 播放烟测
 	V.play_id("pl_grok_bt")
 	print("VOICE play ok: ", V.cur_id == "pl_grok_bt", " missing silently: ", not V.play_id("pl_grok_nonexistent"))
+	var bus_i := AudioServer.get_bus_index("Voice")
+	print("VOICE bus predefined: ", bus_i >= 0, " index=", bus_i)
+	print("VOICE playback_type default: ", V.player.playback_type == AudioServer.PLAYBACK_TYPE_DEFAULT, " raw=", V.player.playback_type)
+	var lat = ProjectSettings.get_setting("audio/driver/output_latency.web", -1)
+	print("VOICE output_latency.web=", lat)
+	if bus_i < 0:
+		push_error("Voice bus missing at load")
+	if V.player.playback_type == AudioServer.PLAYBACK_TYPE_STREAM:
+		push_error("Voice player should not use STREAM playback")
 	quit()

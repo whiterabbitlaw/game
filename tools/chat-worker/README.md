@@ -30,7 +30,7 @@ npx wrangler dev
 
 若设置了 `GEMINI_API_KEY` 密钥，文本生成会优先走 Gemini；免费档的提示可能会被用于改进 Google 产品，请在上线前自行权衡。
 
-若设置了 `CHAT_TOKEN`，请求需带 `Authorization: Bearer <token>`（`/health` 除外）。本地不设则不校验，**公开部署前请务必加上**。
+生产环境用 Origin 白名单（GitHub Pages、qiyunju.pages.dev、localhost）和每 IP 每分钟 30 次限流，不依赖公开构建里的共享口令。
 
 ## 不要做的事
 

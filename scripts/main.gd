@@ -666,6 +666,9 @@ func open_settings() -> void:
 		vm.text = "静音" if not Voice.muted() else "取消静音"
 		Game.save_game())
 	vb.add_child(vrow)
+	var chatb := UI.btn("畅聊接口 / 自定义 API", "ghost", 26, Vector2(560, 64))
+	chatb.pressed.connect(func(): open_chat_settings())
+	vb.add_child(chatb)
 	var sp := UI.btn("试玩加速：×%d（点击切换）" % int(Game.speed), "ghost", 26, Vector2(560, 64))
 	sp.pressed.connect(func():
 		Game.speed = {1.0: 10.0, 10.0: 60.0, 60.0: 1.0}.get(Game.speed, 1.0)
@@ -688,6 +691,16 @@ func open_settings() -> void:
 	vb.add_child(rs)
 	var m := await modal("设置", vb, [{"t": "关闭", "kind": "gold", "w": 220}])
 	holder[0] = m
+
+func open_chat_settings() -> void:
+	var form := ChatSettingsForm.new()
+	var body := form.build()
+	await modal("畅聊接口", body, [
+		{"t": "保存", "kind": "jade", "w": 200, "cb": func():
+			form.save()
+			show_toast("已保存在本机，不会上传")},
+		{"t": "关闭", "kind": "ghost", "w": 200},
+	], 640)
 
 func _confirm_reset() -> void:
 	modal("确认清除？", body_text("所有进度、好感与回忆都会被清除，无法恢复。", 28), [

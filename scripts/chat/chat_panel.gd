@@ -61,6 +61,11 @@ func _build() -> void:
 	tts_btn = UI.btn("语音开", "ghost", 22, Vector2(110, 52))
 	tts_btn.pressed.connect(_toggle_tts)
 	head.add_child(tts_btn)
+	var setb := UI.btn("接口", "ghost", 22, Vector2(90, 52))
+	setb.pressed.connect(func():
+		if main:
+			main.open_chat_settings())
+	head.add_child(setb)
 	var hint := UI.lbl("草稿人设 · 每句话都会记在本机。连上 Worker 后才能得到新回复。", 18, UI.INK_SOFT)
 	hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	hint.custom_minimum_size = Vector2(620, 0)
@@ -98,7 +103,7 @@ func _build() -> void:
 	player = AudioStreamPlayer.new()
 	if AudioServer.get_bus_index("Voice") >= 0:
 		player.bus = "Voice"
-	player.playback_type = AudioServer.PLAYBACK_TYPE_STREAM
+	player.playback_type = AudioServer.PLAYBACK_TYPE_DEFAULT
 	add_child(player)
 
 
@@ -142,7 +147,7 @@ func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
 	_bubble("assistant", text)
 	_set_status("")
 	memory.maybe_roll_summary()
-	if client.tts_enabled:
+	if client.cfg.tts_enabled:
 		client.tts(text, "ZH")
 	_scroll_to_end()
 
@@ -157,13 +162,14 @@ func _on_tts(ok: bool, bytes: PackedByteArray) -> void:
 
 
 func _toggle_tts() -> void:
-	client.tts_enabled = not client.tts_enabled
+	client.cfg.tts_enabled = not client.cfg.tts_enabled
+	client.cfg.save()
 	_sync_tts_btn()
 
 
 func _sync_tts_btn() -> void:
 	if tts_btn and client:
-		tts_btn.text = "语音开" if client.tts_enabled else "语音关"
+		tts_btn.text = "语音开" if client.cfg.tts_enabled else "语音关"
 
 
 func _bubble(role: String, text: String) -> void:

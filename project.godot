@@ -14,6 +14,11 @@ config/icon="res://icon.png"
 Game="*res://scripts/game.gd"
 Voice="*res://scripts/voice.gd"
 
+[audio]
+
+buses/default_bus_layout="res://default_bus_layout.tres"
+driver/output_latency.web=90
+
 [display]
 
 window/size/viewport_width=720

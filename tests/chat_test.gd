@@ -11,6 +11,7 @@ func _initialize() -> void:
 	_test_assembler()
 	_test_memory()
 	_test_anniversary()
+	_test_custom_api()
 	if failed == 0:
 		print("chat_test: ALL OK")
 	else:
@@ -163,3 +164,58 @@ func _test_anniversary() -> void:
 	_ok("first_meet" not in types3, "first-meet day itself is not an anniversary")
 	var note := a.format_system_note(ev2)
 	_ok(note.find("纪念日") >= 0, "system note")
+
+
+func _test_custom_api() -> void:
+	print("== custom api ==")
+	_ok(ChatConfig.PATH.begins_with("user://"), "config lives in user://")
+	_ok(ChatConfig.DEFAULT_WORKER_URL.find("qiyunju-chat") >= 0, "default worker url")
+	_ok(ChatConfig.DEFAULT_WORKER_URL.begins_with("https://"), "default is https")
+	var cfg := ChatConfig.new()
+	cfg.path = "user://chat/_test_chat_config.json"
+	# default: worker
+	var plan := cfg.plan_chat([{"role": "user", "content": "你好"}])
+	_ok(str(plan.get("kind", "")) == ChatConfig.PROVIDER_WORKER, "default routes to worker")
+	_ok(str(plan.get("url", "")).ends_with("/v1/chat"), "worker chat path")
+	var hdrs: PackedStringArray = plan.get("headers", PackedStringArray())
+	var joined := " ".join(hdrs)
+	_ok(joined.find("Bearer") < 0, "worker plan has no bearer key")
+	# openai compatible
+	cfg.provider = ChatConfig.PROVIDER_OPENAI
+	cfg.openai_base_url = "https://example.com/v1"
+	cfg.openai_model = "foo-bar"
+	cfg.openai_api_key = "sk-test-not-real"
+	_ok(cfg.uses_custom_chat(), "openai counts as custom")
+	_ok(cfg.openai_chat_url() == "https://example.com/v1/chat/completions", "openai url join")
+	cfg.openai_base_url = "https://example.com/v1/chat/completions"
+	_ok(cfg.openai_chat_url() == "https://example.com/v1/chat/completions", "openai url already complete")
+	cfg.openai_base_url = "https://example.com/v1"
+	plan = cfg.plan_chat([{"role": "system", "content": "s"}, {"role": "user", "content": "hi"}])
+	_ok(str(plan.get("kind", "")) == "openai", "openai kind")
+	_ok(str(plan["url"]).ends_with("/chat/completions"), "openai path")
+	_ok(str(plan["body"].get("model", "")) == "foo-bar", "openai model")
+	var h2: PackedStringArray = plan.get("headers", PackedStringArray())
+	_ok(" ".join(h2).find("Bearer sk-test-not-real") >= 0, "openai bearer present in request plan")
+	# gemini
+	cfg.provider = ChatConfig.PROVIDER_GEMINI
+	cfg.gemini_api_key = "AIza-test-not-real"
+	cfg.gemini_model = "gemini-2.5-flash"
+	_ok(cfg.uses_custom_chat(), "gemini counts as custom")
+	plan = cfg.plan_chat([{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}])
+	_ok(str(plan.get("kind", "")) == "gemini", "gemini kind")
+	_ok(str(plan.get("url", "")).find("generativelanguage.googleapis.com") >= 0, "gemini host")
+	_ok(typeof(plan["body"].get("systemInstruction", {})) == TYPE_DICTIONARY, "gemini system")
+	var extracted := cfg.extract_chat_text("openai", {"choices": [{"message": {"content": "  你好  "}}]})
+	_ok(extracted == "你好", "extract openai text")
+	extracted = cfg.extract_chat_text("gemini", {"candidates": [{"content": {"parts": [{"text": "喵"}]}}]})
+	_ok(extracted == "喵", "extract gemini text")
+	extracted = cfg.extract_chat_text("worker", {"text": "嗯"})
+	_ok(extracted == "嗯", "extract worker text")
+	# provider=worker even if a key is stored
+	cfg.provider = ChatConfig.PROVIDER_WORKER
+	cfg.apply_dict({"provider": "worker", "openai_api_key": "sk-should-not-switch"})
+	_ok(cfg.provider == ChatConfig.PROVIDER_WORKER, "explicit worker not overridden by leftover key")
+	cfg.save()
+	_ok(FileAccess.file_exists(cfg.path), "saves only under user://")
+	_ok(cfg.path.begins_with("user://"), "save path still user://")
+	DirAccess.remove_absolute(OS.get_user_data_dir().path_join("chat/_test_chat_config.json"))
