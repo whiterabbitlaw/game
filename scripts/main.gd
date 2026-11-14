@@ -16,6 +16,7 @@ var top_stone: Label
 var top_herb: Label
 var toast_lbl: Label
 var detail: DetailView = null
+var chat_panel: ChatPanel = null
 var _busy_story := false
 var _toast_tw: Tween
 var _bg_name := ""
@@ -576,6 +577,19 @@ func close_detail() -> void:
 	if is_instance_valid(detail):
 		detail.queue_free()
 	detail = null
+
+func open_free_chat(id: String) -> void:
+	if is_instance_valid(chat_panel):
+		chat_panel.queue_free()
+	chat_panel = ChatPanel.new()
+	chat_panel.main = self
+	overlay.add_child(chat_panel)
+	chat_panel.open_chat(id)
+
+func close_free_chat() -> void:
+	if is_instance_valid(chat_panel):
+		chat_panel.queue_free()
+	chat_panel = null
 
 func show_offline(off: Dictionary) -> void:
 	var vb := VBoxContainer.new()

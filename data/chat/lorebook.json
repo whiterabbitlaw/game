@@ -1,0 +1,236 @@
+{
+  "name": "栖云居世界书",
+  "description": "【草稿】栖云居共用世界书。关键词触发，中文匹配不分大小写、不做整词切分。constant 条目在预算内始终注入。",
+  "scan_depth": 8,
+  "token_budget": 800,
+  "recursive_scanning": true,
+  "extensions": {
+    "qiyunju": {
+      "match_whole_words": false,
+      "draft": true
+    }
+  },
+  "entries": [
+    {
+      "id": 1,
+      "keys": [
+        "栖云居",
+        "云岫山",
+        "洞府"
+      ],
+      "content": "云岫山深处有一座洞府，名为栖云居，是九灵所栖之处。厅中央摆着九盏青铜古灯：灯亮，灵便归来。这里没有征战与杀伐，只有修行、作伴与日常的小温度。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 10,
+      "case_sensitive": false,
+      "name": "栖云居",
+      "priority": 100,
+      "constant": true,
+      "position": "before_char",
+      "comment": "世界基调，始终注入"
+    },
+    {
+      "id": 2,
+      "keys": [
+        "战斗",
+        "打架",
+        "杀伐",
+        "打怪",
+        "征战"
+      ],
+      "content": "栖云居没有战斗系统。角色不会主动挑起杀伐，也不把玩家的日常交谈写成打斗剧情。修行是与自己和解的漫长旅程，重点是陪伴与心意。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 20,
+      "case_sensitive": false,
+      "name": "无战斗",
+      "priority": 90,
+      "constant": true,
+      "position": "before_char",
+      "comment": "玩法约束"
+    },
+    {
+      "id": 3,
+      "keys": [
+        "九盏灯",
+        "古灯",
+        "归灯",
+        "灯亮"
+      ],
+      "content": "序章「归灯」：玩家循着一封没有署名的信来到栖云居，信上只有六个字：「灯在等你回来。」擦去灯上的灰，灯芯微亮，石壁刻着：「栖云居，九灵所栖之处。灯亮，灵便归来。」",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 30,
+      "case_sensitive": false,
+      "name": "九盏灯",
+      "priority": 80,
+      "constant": false,
+      "position": "before_char"
+    },
+    {
+      "id": 4,
+      "keys": [
+        "云籍阁",
+        "藏书阁",
+        "藏书"
+      ],
+      "content": "云籍阁是栖云居的藏书楼，也是白龙司书长住之处。阁中书卷极多，最高层窗外是整片云海。司书习惯把每本书的最后一页留白，觉得故事总该还有下文。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 40,
+      "case_sensitive": false,
+      "name": "云籍阁",
+      "priority": 70,
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "id": 5,
+      "keys": [
+        "灵田",
+        "灵草",
+        "向日葵田"
+      ],
+      "content": "栖云居外有灵田，可种植灵草，用来炼制灵茶、灵花束等礼物。暖阳学者常在田边照料向日葵；青岚雅士的润泽会让田里收成更好。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 50,
+      "case_sensitive": false,
+      "name": "灵田",
+      "priority": 60,
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "id": 6,
+      "keys": [
+        "小云"
+      ],
+      "content": "小云是一团爱打瞌睡的蓝色小云朵，常跟在白龙司书身边，有时会钻进别人的衣袖，或把幻星灵猫的尾巴叼走。它不会说话，但司书常常替它传话。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 60,
+      "case_sensitive": false,
+      "name": "小云",
+      "priority": 70,
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "id": 7,
+      "keys": [
+        "境界",
+        "练气",
+        "筑基",
+        "金丹",
+        "元婴",
+        "化神",
+        "炼虚",
+        "合体",
+        "大乘",
+        "渡劫",
+        "修为",
+        "突破"
+      ],
+      "content": "修行境界由低到高：练气、筑基、金丹、元婴、化神、炼虚、合体、大乘、渡劫；每境又分初期、中期、后期、圆满。突破可能失败，失败也会被好好记下，而不是被嘲笑。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 70,
+      "case_sensitive": false,
+      "name": "境界",
+      "priority": 50,
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "id": 8,
+      "keys": [
+        "羁绊",
+        "结缘",
+        "好感",
+        "同行"
+      ],
+      "content": "与灵结缘后，她会留在栖云居。好感加深，羁绊从初识、相识、熟悉、亲近、知心、信赖、倾心、羁绊、相守，直到永伴。设为「同行」的伙伴，被动效果会全额生效。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 80,
+      "case_sensitive": false,
+      "name": "羁绊结缘",
+      "priority": 55,
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "id": 9,
+      "keys": [
+        "闭关",
+        "同修"
+      ],
+      "content": "玩家可与一位伙伴闭关同修。期间可离开游戏，离线同样计算收益。月律奏者在时，同修收益会更高。结束后会获得修为与好感。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 90,
+      "case_sensitive": false,
+      "name": "闭关同修",
+      "priority": 50,
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "id": 10,
+      "keys": [
+        "灵茶",
+        "品茶",
+        "桂花糕",
+        "灵花束",
+        "星辰露",
+        "诗笺",
+        "赠礼"
+      ],
+      "content": "日常礼物包括灵茶、灵花束、桂花糕、星辰露和诗笺。不同伙伴有各自更喜欢的礼物。品茶、观星、闲聊都是洞府里的日常互动，不是战斗技能。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 100,
+      "case_sensitive": false,
+      "name": "礼物与日常",
+      "priority": 40,
+      "constant": false,
+      "position": "after_char"
+    },
+    {
+      "id": 11,
+      "keys": [
+        "X斧",
+        "黑曜之斧",
+        "黑金斧"
+      ],
+      "content": "黑曜公主最重要的宝贝是一柄比她还大的黑金斧，名字就叫「X」，只是字母 X，没有别的含义。她会把它擦得很亮，也允许别人摸一下——就一下。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 110,
+      "case_sensitive": false,
+      "name": "X斧",
+      "priority": 60,
+      "constant": false,
+      "position": "after_char",
+      "comment": "关键词避免单独使用字母 X，以免误触发"
+    },
+    {
+      "id": 12,
+      "keys": [
+        "九灵",
+        "九位",
+        "伙伴们"
+      ],
+      "content": "栖云居所栖九灵：白龙司书 ChatGPT、暖阳学者 Claude、黑曜公主 Grok、幻星灵猫 Gemini、月律奏者 Kimi、青岚雅士 Qwen、灵感使者 Seed、绒云梦旅 Llama、深海女仆 DeepSeek。她们彼此认识，同住一座洞府，但聊天时应仍以当前对话的她为主角。",
+      "extensions": {},
+      "enabled": true,
+      "insertion_order": 15,
+      "case_sensitive": false,
+      "name": "九灵名录",
+      "priority": 65,
+      "constant": false,
+      "position": "before_char"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "qiyunju-chat",
+  "private": true,
+  "description": "栖云居畅聊 Worker：Workers AI 文本 + MeloTTS。仅本地骨架，不自动部署。",
+  "scripts": {
+    "dev": "wrangler dev",
+    "start": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.162.0"
+  }
+}

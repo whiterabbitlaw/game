@@ -1,0 +1,14 @@
+name = "qiyunju-chat"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+# 本地开发：npx wrangler dev
+# 不要在此文件写入 account_id、API 密钥或 Gemini key。
+# 若要用 Gemini 免费密钥，请执行：
+#   npx wrangler secret put GEMINI_API_KEY
+# 生产环境建议再放一个共享口令：
+#   npx wrangler secret put CHAT_TOKEN
+# 本仓库不会替你部署。
+
+[ai]
+binding = "AI"

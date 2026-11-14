@@ -32,3 +32,16 @@ python3 -m http.server -d build/web 8765
 
 ## 版权
 角色设定来自用户提供的 AI 拟人同人设定图，Q 版为二次创作。字体：Noto Sans CJK SC（SIL OFL）、Ma Shan Zheng（SIL OFL）。
+
+## 畅聊（P1 骨架，本地分支）
+
+结构借鉴 SillyTavern：人设 `data/chat/persona.json`、角色卡 `data/chat/cards/`（Character Card V2 兼容，均为草稿）、世界书 `data/chat/lorebook.json`。脚本在 `scripts/chat/`。聊天记录存在本机 `user://chat/`，不会进仓库。
+
+本地 Worker（不要把密钥提交进仓库）：
+
+```bash
+cd tools/chat-worker
+npx wrangler dev
+```
+
+默认地址 `http://127.0.0.1:8787`。游戏里可在 `user://chat_config.json` 写 `{"worker_url":"...","tts":true}`。结缘后的伙伴详情左上角有「畅聊」。本骨架默认不部署、不推送。

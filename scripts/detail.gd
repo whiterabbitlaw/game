@@ -13,6 +13,7 @@ var lv_lbl: Label
 var pass_lbl: Label
 var btns: Dictionary = {}
 var _built := false
+var talk_btn: Button
 
 func show_char(id: String) -> void:
 	cid = id
@@ -54,6 +55,11 @@ func show_char(id: String) -> void:
 	back.position = Vector2(20, 24)
 	back.pressed.connect(func(): main.close_detail())
 	add_child(back)
+	talk_btn = UI.btn("畅聊", "jade", 26, Vector2(130, 56))
+	talk_btn.position = Vector2(160, 24)
+	talk_btn.pressed.connect(func(): main.open_free_chat(id))
+	talk_btn.visible = Game.is_recruited(id)
+	add_child(talk_btn)
 	# 信息面板
 	var panel := PanelContainer.new()
 	panel.position = Vector2(20, 660)
@@ -104,6 +110,8 @@ func _refresh() -> void:
 	var id := cid
 	var d := Data.char_def(id)
 	var rec := Game.is_recruited(id)
+	if talk_btn:
+		talk_btn.visible = rec
 	for c in btn_grid.get_children():
 		c.queue_free()
 	btns.clear()
