@@ -44,4 +44,4 @@ cd tools/chat-worker
 npx wrangler dev
 ```
 
-默认地址 `https://qiyunju-chat.whiterabbitlaw.workers.dev`（本地可在 `user://chat_config.json` 改回 `http://127.0.0.1:8787`）。设置里可配置 OpenAI 兼容或 Gemini 自定义接口，密钥只存在本机。游戏里可在 `user://chat_config.json` 写 `{"worker_url":"...","tts":true}`。结缘后的伙伴详情左上角有「畅聊」。本骨架默认不部署、不推送。
+默认地址 `https://qiyunju-chat.whiterabbitlaw.workers.dev`（本地可在 `user://chat_config.json` 改回 `http://127.0.0.1:8787`）。设置里可配置 OpenAI 兼容或 Gemini 自定义接口，密钥只存在本机。游戏里可在 `user://chat_config.json` 写 `{"worker_url":"...","tts":true}`。结缘后的伙伴详情左上角有「畅聊」。默认 Worker 已部署；自定义密钥只保存在本机，不会进仓库。

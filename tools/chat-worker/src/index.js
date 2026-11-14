@@ -118,6 +118,18 @@ async function handleSummarize(request, env, origin) {
   return json(origin, { text, model });
 }
 
+
+function detectAudioFormat(audio) {
+  if (!audio || typeof audio !== "string") return "mp3";
+  try {
+    const head = atob(audio.slice(0, 16));
+    if (head.startsWith("RIFF") && head.includes("WAVE")) return "wav";
+    if (head.startsWith("OggS")) return "ogg";
+    if (head.startsWith("ID3") || (head.charCodeAt(0) === 0xff && (head.charCodeAt(1) & 0xe0) === 0xe0)) return "mp3";
+  } catch (_) {}
+  return "mp3";
+}
+
 async function handleTts(request, env, origin) {
   const body = await readJson(request);
   const text = String(body.text || "").trim().slice(0, 400);
@@ -127,7 +139,7 @@ async function handleTts(request, env, origin) {
   const result = await env.AI.run(TTS_MODEL, { prompt: text, lang });
   const audio = result && (result.audio || result.result?.audio) ? result.audio || result.result.audio : "";
   if (!audio) return json(origin, { error: "tts returned no audio" }, 502);
-  return json(origin, { audio, format: "mp3", model: TTS_MODEL, lang });
+  return json(origin, { audio, format: detectAudioFormat(audio), model: TTS_MODEL, lang });
 }
 
 async function generateText(env, messages, model) {

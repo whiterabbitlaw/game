@@ -155,10 +155,53 @@ func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
 func _on_tts(ok: bool, bytes: PackedByteArray) -> void:
 	if not ok or bytes.is_empty():
 		return
-	var stream := AudioStreamMP3.new()
-	stream.data = bytes
+	var stream := _stream_from_audio_bytes(bytes)
+	if stream == null:
+		return
 	player.stream = stream
 	player.play()
+
+
+func _stream_from_audio_bytes(bytes: PackedByteArray) -> AudioStream:
+	if bytes.size() >= 12 and _bytes_ascii(bytes, 0, 4) == "RIFF" and _bytes_ascii(bytes, 8, 4) == "WAVE":
+		return _wav_from_bytes(bytes)
+	var mp3 := AudioStreamMP3.new()
+	mp3.data = bytes
+	return mp3
+
+
+func _bytes_ascii(bytes: PackedByteArray, start: int, length: int) -> String:
+	return bytes.slice(start, start + length).get_string_from_ascii()
+
+
+func _wav_from_bytes(bytes: PackedByteArray) -> AudioStreamWAV:
+	var offset := 12
+	var channels := 1
+	var rate := 44100
+	var bits := 16
+	var data := PackedByteArray()
+	while offset + 8 <= bytes.size():
+		var cid := _bytes_ascii(bytes, offset, 4)
+		var csize := int(bytes.decode_u32(offset + 4))
+		var cstart := offset + 8
+		if cid == "fmt " and csize >= 16 and cstart + 16 <= bytes.size():
+			channels = maxi(int(bytes.decode_u16(cstart + 2)), 1)
+			rate = maxi(int(bytes.decode_u32(cstart + 4)), 1)
+			bits = int(bytes.decode_u16(cstart + 14))
+		elif cid == "data":
+			data = bytes.slice(cstart, mini(cstart + csize, bytes.size()))
+			break
+		offset = cstart + csize
+		if csize % 2 == 1:
+			offset += 1
+	if data.is_empty():
+		return null
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_8_BITS if bits == 8 else AudioStreamWAV.FORMAT_16_BITS
+	stream.mix_rate = rate
+	stream.stereo = channels > 1
+	stream.data = data
+	return stream
 
 
 func _toggle_tts() -> void:
