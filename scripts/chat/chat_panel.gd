@@ -1,6 +1,6 @@
 class_name ChatPanel
 extends Control
-## 畅聊面板：打字发送，可选把回复交给 Worker 的 MeloTTS 出声。P1 本地骨架。
+## 畅聊面板：打字发送，可选 TTS。含记忆编辑、图片/听写脚手架、小窗模式。
 
 var main: Control
 var char_id := ""
@@ -17,8 +17,19 @@ var send_btn: Button
 var status_lbl: Label
 var tts_btn: Button
 var title_lbl: Label
+var attach: ChatAttach
 var _note := ""
 var _waiting := false
+var _attachments: Array = []
+var _mini := false
+var _web_bubble := false
+var _dragging := false
+var _drag_off := Vector2.ZERO
+var _panel: PanelContainer
+var _saved_win_size := Vector2i.ZERO
+var _saved_win_pos := Vector2i.ZERO
+var _saved_borderless := false
+var _saved_on_top := false
 
 
 func open_chat(id: String) -> void:
@@ -27,7 +38,14 @@ func open_chat(id: String) -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	memory.open(id)
 	anniversary.load_all()
-	_note = anniversary.format_system_note(anniversary.due_today({}, memory.first_meet_unix()))
+	var evs: Array = anniversary.unclaimed_today({}, memory.first_meet_unix(), {
+		"recruited_at": Game.recruited_at(id) if Game.is_recruited(id) else 0,
+		"streak": int(Game.s.get("streak", 0)),
+	})
+	var ask := anniversary.birthday_prompt_needed()
+	_note = anniversary.format_system_note(evs, ask)
+	if ask:
+		ChatProfile.new().mark_asked_birthday()
 	memory.maybe_roll_summary()
 	_build()
 	_hydrate()
@@ -40,6 +58,7 @@ func _build() -> void:
 	dim.color = Color(0.08, 0.07, 0.14, 0.55)
 	add_child(dim)
 	var panel := PanelContainer.new()
+	_panel = panel
 	panel.position = Vector2(20, 80)
 	panel.size = Vector2(680, 1120)
 	panel.add_theme_stylebox_override("panel", UI.panel(Color(1, 0.985, 0.95, 0.97), d.get("color", UI.GOLD), 28, 3))
@@ -66,7 +85,15 @@ func _build() -> void:
 		if main:
 			main.open_chat_settings())
 	head.add_child(setb)
-	var hint := UI.lbl("草稿人设 · 每句话都会记在本机。连上 Worker 后才能得到新回复。", 18, UI.INK_SOFT)
+	var memb := UI.btn("记忆", "ghost", 22, Vector2(90, 52))
+	memb.pressed.connect(_open_memory)
+	head.add_child(memb)
+	var minib := UI.btn("小窗", "ghost", 22, Vector2(90, 52))
+	minib.pressed.connect(toggle_mini)
+	head.add_child(minib)
+	# 让标题栏可拖（网页气泡 / 桌面无边框）
+	head.gui_input.connect(_on_head_gui)
+	var hint := UI.lbl("每句话都会记在本机。可点「记忆」查看或删除。网页发图走文件选择；视频抽帧稍后接入。", 18, UI.INK_SOFT)
 	hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	hint.custom_minimum_size = Vector2(620, 0)
 	root.add_child(hint)
@@ -95,11 +122,30 @@ func _build() -> void:
 	send_btn = UI.btn("发送", "jade", 26, Vector2(130, 56))
 	send_btn.pressed.connect(_send)
 	row.add_child(send_btn)
+	var imgb := UI.btn("图片", "ghost", 22, Vector2(90, 56))
+	imgb.pressed.connect(func(): attach.pick_image())
+	row.add_child(imgb)
+	var sttb := UI.btn("听写", "ghost", 22, Vector2(90, 56))
+	sttb.pressed.connect(func(): attach.pick_audio())
+	row.add_child(sttb)
+	var vidb := UI.btn("视频", "ghost", 22, Vector2(90, 56))
+	vidb.pressed.connect(func():
+		_set_status("视频将在本地抽帧后再看，这一步稍后接入。"))
+	row.add_child(vidb)
 	client = ChatClient.new()
 	add_child(client)
 	client.chat_finished.connect(_on_chat)
 	client.tts_finished.connect(_on_tts)
+	client.summarize_finished.connect(_on_summarize)
+	client.extract_finished.connect(_on_extract)
+	client.vision_finished.connect(_on_vision)
+	client.stt_finished.connect(_on_stt)
+	attach = ChatAttach.new()
+	add_child(attach)
+	attach.file_picked.connect(_on_file)
+	attach.cancelled.connect(func(): _set_status("没有选择文件。"))
 	_sync_tts_btn()
+	_maybe_background_memory()
 	player = AudioStreamPlayer.new()
 	if AudioServer.get_bus_index("Voice") >= 0:
 		player.bus = "Voice"
@@ -133,7 +179,8 @@ func _send() -> void:
 	_waiting = true
 	send_btn.disabled = true
 	_set_status("正在请她想一想……")
-	var packed := assembler.assemble(char_id, memory.recent(30), text, memory, _note)
+	var packed := assembler.assemble(char_id, memory.recent(30), text, memory, _note, ChatPromptAssembler.DEFAULT_BUDGET, _attachments)
+	_attachments = []
 	client.chat(packed["messages"])
 
 
@@ -147,6 +194,7 @@ func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
 	_bubble("assistant", text)
 	_set_status("")
 	memory.maybe_roll_summary()
+	_maybe_background_memory()
 	if client.cfg.tts_enabled:
 		client.tts(text, "ZH")
 	_scroll_to_end()
@@ -241,3 +289,167 @@ func _scroll_to_end() -> void:
 	await get_tree().process_frame
 	if scroll:
 		scroll.scroll_vertical = int(scroll.get_v_scroll_bar().max_value)
+
+
+func _maybe_background_memory() -> void:
+	if client == null:
+		return
+	if memory.needs_llm_summary():
+		var hist: Array = memory.pending_summary_messages()
+		if hist.is_empty():
+			hist = memory.recent(24)
+		client.summarize(hist)
+	var fresh := memory.unextracted_messages()
+	var users := 0
+	for m in fresh:
+		if str(m.get("role", "")) == "user":
+			users += 1
+	if users >= 1 and fresh.size() >= 2:
+		client.extract_facts(fresh)
+
+
+func _on_summarize(ok: bool, text: String, _raw: Dictionary) -> void:
+	if ok and text != "":
+		memory.apply_llm_summary(text)
+
+
+func _on_extract(ok: bool, facts: Array, _raw: Dictionary) -> void:
+	if not ok:
+		return
+	memory.mark_extracted()
+	var profile := ChatProfile.new()
+	for f in facts:
+		if typeof(f) != TYPE_DICTIONARY:
+			continue
+		var kind := str(f.get("kind", "other"))
+		var shared := kind in ["name", "like", "date"]
+		if f.has("shared"):
+			shared = bool(f.get("shared"))
+		if shared:
+			profile.add_shared_fact(f)
+			if kind == "date" and (str(f.get("text", "")).find("生日") >= 0 or str(f.get("kind_hint", "")) == "birthday"):
+				profile.apply_birthday(str(f.get("text", "")), str(f.get("date", "")))
+		if not shared or kind == "promise":
+			memory.merge_fact(f)
+		elif kind == "like":
+			# 喜好同时记一份在当前角色下，方便检索
+			var cf: Dictionary = (f as Dictionary).duplicate()
+			cf["scope"] = "char"
+			memory.merge_fact(cf)
+
+
+func _on_vision(ok: bool, text: String, _raw: Dictionary) -> void:
+	if not ok or text.strip_edges() == "":
+		_set_status(text if text != "" else "看图失败。")
+		return
+	_attachments.append({"kind": "image", "description": text.strip_edges()})
+	_set_status("她已经在看这张图了。补一句要说的话，或直接发送。")
+	if input and input.text.strip_edges() == "":
+		input.text = "你看这张图。"
+
+
+func _on_stt(ok: bool, text: String, _raw: Dictionary) -> void:
+	if not ok or text.strip_edges() == "":
+		_set_status(text if text != "" else "听写失败。麦克风实时采集稍后接入，现在可先选一段音频文件。")
+		return
+	if input:
+		if input.text.strip_edges() != "":
+			input.text = input.text + text
+		else:
+			input.text = text
+	_set_status("听写完成，可以改一改再发送。")
+
+
+func _on_file(kind: String, bytes: PackedByteArray, mime: String, _name: String) -> void:
+	if bytes.is_empty():
+		return
+	var b64 := Marshalls.raw_to_base64(bytes)
+	if kind == "audio":
+		_set_status("正在听写……")
+		client.stt(b64, mime)
+	else:
+		_set_status("正在看图……")
+		client.vision(b64, "请用简体中文简要描述这张图片里有什么，不超过 120 字。", mime)
+
+
+func _open_memory() -> void:
+	var view := ChatMemoryView.new()
+	add_child(view)
+	view.setup(memory)
+
+
+func toggle_mini() -> void:
+	if OS.has_feature("web"):
+		_web_bubble = not _web_bubble
+		_apply_web_bubble()
+		return
+	_mini = not _mini
+	var win := get_window()
+	if _mini:
+		_saved_win_size = win.size
+		_saved_win_pos = win.position
+		_saved_borderless = win.borderless
+		_saved_on_top = win.always_on_top
+		win.borderless = true
+		win.always_on_top = true
+		win.size = Vector2i(420, 680)
+		_apply_compact_panel(true)
+	else:
+		win.borderless = _saved_borderless
+		win.always_on_top = _saved_on_top
+		if _saved_win_size != Vector2i.ZERO:
+			win.size = _saved_win_size
+			win.position = _saved_win_pos
+		_apply_compact_panel(false)
+
+
+func _apply_web_bubble() -> void:
+	_apply_compact_panel(_web_bubble)
+
+
+func _apply_compact_panel(compact: bool) -> void:
+	if _panel == null:
+		for c in get_children():
+			if c is PanelContainer:
+				_panel = c
+				break
+	if _panel == null:
+		return
+	if compact:
+		_panel.position = Vector2(20, 200)
+		_panel.size = Vector2(460, 820)
+		if scroll:
+			scroll.custom_minimum_size = Vector2(420, 480)
+	else:
+		_panel.position = Vector2(20, 80)
+		_panel.size = Vector2(680, 1120)
+		if scroll:
+			scroll.custom_minimum_size = Vector2(620, 760)
+
+
+func _on_head_gui(event: InputEvent) -> void:
+	if not (_mini or _web_bubble):
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		_dragging = event.pressed
+		if _panel:
+			_drag_off = event.position
+		if OS.has_feature("web") == false and event.pressed:
+			pass
+	elif event is InputEventMouseMotion and _dragging:
+		if OS.has_feature("web"):
+			if _panel:
+				_panel.position += event.relative
+		else:
+			var win := get_window()
+			win.position = win.position + Vector2i(event.relative)
+
+
+func _exit_tree() -> void:
+	if _mini and not OS.has_feature("web"):
+		var win := get_window()
+		win.borderless = _saved_borderless
+		win.always_on_top = _saved_on_top
+		if _saved_win_size != Vector2i.ZERO:
+			win.size = _saved_win_size
+			win.position = _saved_win_pos

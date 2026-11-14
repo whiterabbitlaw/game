@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "description": "畅聊模块注册顺序。组装器按此顺序收集各模块的提示词片段，再按 placement 拼进系统设定或历史。可改此文件调整顺序，无需改脚本。",
+  "order": [
+    "card_system",
+    "persona",
+    "lorebook_before",
+    "card",
+    "lorebook_after",
+    "lorebook_before_example",
+    "examples",
+    "lorebook_after_example",
+    "memory",
+    "events",
+    "multimodal"
+  ]
+}

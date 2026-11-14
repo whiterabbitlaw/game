@@ -120,6 +120,12 @@ func worker_tts_url() -> String:
 	return worker_url.rstrip("/") + "/v1/tts"
 
 
+func worker_path(path: String) -> String:
+	if not path.begins_with("/"):
+		path = "/" + path
+	return worker_url.rstrip("/") + path
+
+
 ## 组装一次聊天请求（不含密钥明文日志）。TTS 始终走 Worker。
 func plan_chat(messages: Array) -> Dictionary:
 	if uses_custom_chat() and provider == PROVIDER_OPENAI:

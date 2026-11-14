@@ -5,12 +5,20 @@ extends Node
 
 signal chat_finished(ok: bool, text: String, raw: Dictionary)
 signal tts_finished(ok: bool, bytes: PackedByteArray)
+signal summarize_finished(ok: bool, text: String, raw: Dictionary)
+signal extract_finished(ok: bool, facts: Array, raw: Dictionary)
+signal vision_finished(ok: bool, text: String, raw: Dictionary)
+signal stt_finished(ok: bool, text: String, raw: Dictionary)
 
 var cfg := ChatConfig.new()
 var _http: HTTPRequest
+var _bg: HTTPRequest
 var _busy := false
+var _bg_busy := false
 var _mode := ""
 var _kind := ""
+var _bg_mode := ""
+var _bg_queue: Array = []
 
 
 func _ready() -> void:
@@ -19,6 +27,10 @@ func _ready() -> void:
 	_http.timeout = 90.0
 	add_child(_http)
 	_http.request_completed.connect(_on_done)
+	_bg = HTTPRequest.new()
+	_bg.timeout = 90.0
+	add_child(_bg)
+	_bg.request_completed.connect(_on_bg_done)
 
 
 func reload_config() -> void:
@@ -49,6 +61,73 @@ func tts(text: String, lang: String = "ZH") -> void:
 	_kind = ChatConfig.PROVIDER_WORKER
 	_busy = true
 	_request(cfg.worker_tts_url(), PackedStringArray(["Content-Type: application/json", "Accept: application/json"]), {"text": text, "lang": lang})
+
+
+func summarize(messages: Array) -> void:
+	_enqueue_bg("summarize", cfg.worker_path("/v1/summarize"), {"messages": messages})
+
+
+func extract_facts(messages: Array) -> void:
+	_enqueue_bg("extract", cfg.worker_path("/v1/memory/extract"), {"messages": messages})
+
+
+func vision(image_b64: String, prompt: String = "", mime: String = "image/jpeg") -> void:
+	var body := {"image": image_b64, "mime": mime}
+	if prompt.strip_edges() != "":
+		body["prompt"] = prompt
+	_enqueue_bg("vision", cfg.worker_path("/v1/vision"), body)
+
+
+func stt(audio_b64: String, format: String = "wav") -> void:
+	_enqueue_bg("stt", cfg.worker_path("/v1/stt"), {"audio": audio_b64, "format": format})
+
+
+func _enqueue_bg(mode: String, url: String, body: Dictionary) -> void:
+	reload_config()
+	_bg_queue.append({"mode": mode, "url": url, "body": body})
+	_kick_bg()
+
+
+func _kick_bg() -> void:
+	if _bg_busy or _bg_queue.is_empty() or _bg == null:
+		return
+	var job: Dictionary = _bg_queue.pop_front()
+	_bg_mode = str(job.get("mode", ""))
+	_bg_busy = true
+	var err := _bg.request(str(job["url"]), PackedStringArray(["Content-Type: application/json", "Accept: application/json"]), HTTPClient.METHOD_POST, JSON.stringify(job["body"]))
+	if err != OK:
+		_bg_busy = false
+		_emit_bg(false, _bg_mode, {}, "无法发起请求（%s）" % err)
+		_kick_bg()
+
+
+func _on_bg_done(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	var mode := _bg_mode
+	_bg_busy = false
+	_bg_mode = ""
+	var raw: Dictionary = {}
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) == TYPE_DICTIONARY:
+		raw = parsed
+	var ok := result == HTTPRequest.RESULT_SUCCESS and code >= 200 and code < 300
+	var err := ""
+	if not ok:
+		err = str(raw.get("error", "HTTP %d" % code if code else "请求失败"))
+	_emit_bg(ok, mode, raw, err)
+	_kick_bg()
+
+
+func _emit_bg(ok: bool, mode: String, raw: Dictionary, err: String) -> void:
+	match mode:
+		"summarize":
+			summarize_finished.emit(ok, str(raw.get("text", err)).strip_edges(), raw)
+		"extract":
+			var facts: Array = raw.get("facts", []) if typeof(raw.get("facts", [])) == TYPE_ARRAY else []
+			extract_finished.emit(ok, facts, raw)
+		"vision":
+			vision_finished.emit(ok, str(raw.get("text", err)).strip_edges(), raw)
+		"stt":
+			stt_finished.emit(ok, str(raw.get("text", err)).strip_edges(), raw)
 
 
 func _request(url: String, headers: PackedStringArray, body: Dictionary) -> void:

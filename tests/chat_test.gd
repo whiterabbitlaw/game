@@ -12,6 +12,10 @@ func _initialize() -> void:
 	_test_memory()
 	_test_anniversary()
 	_test_custom_api()
+	_test_lorebook_st()
+	_test_memory_p2()
+	_test_events_p2()
+	_test_registry()
 	if failed == 0:
 		print("chat_test: ALL OK")
 	else:
@@ -219,3 +223,147 @@ func _test_custom_api() -> void:
 	_ok(FileAccess.file_exists(cfg.path), "saves only under user://")
 	_ok(cfg.path.begins_with("user://"), "save path still user://")
 	DirAccess.remove_absolute(OS.get_user_data_dir().path_join("chat/_test_chat_config.json"))
+
+
+
+func _test_lorebook_st() -> void:
+	print("== lorebook ST ==")
+	var lore := ChatLorebook.new()
+	lore.book = {
+		"scan_depth": 2,
+		"token_budget": 40,
+		"recursive_scanning": false,
+		"entries": [
+			{"id": "p1", "name": "and_any", "keys": ["桂花"], "secondary_keys": ["糕", "茶"], "selective": true, "selective_logic": "and_any", "content": "桂花点心条目，用来测预算ABCDEFGHIJK", "enabled": true, "priority": 10, "insertion_order": 20, "position": "after_char"},
+			{"id": "p2", "name": "and_all", "keys": ["承诺"], "secondary_keys": ["月色", "茶"], "selective": true, "selective_logic": "and_all", "content": "三重约定", "enabled": true, "insertion_order": 10, "position": "after_char"},
+			{"id": "p3", "name": "not_any", "keys": ["灵田"], "secondary_keys": ["打架"], "selective_logic": "not_any", "content": "灵田安宁", "enabled": true, "position": "before_char"},
+			{"id": "p4", "name": "never", "keys": ["桂花"], "content": "不应出现", "probability": 0, "enabled": true},
+			{"id": "p5", "name": "depth_old", "keys": ["旧词"], "content": "不该扫到", "enabled": true},
+			{"id": "p6", "name": "at_depth", "keys": ["云籍阁"], "content": "插在深处", "position": "at_depth", "depth": 1, "enabled": true},
+		],
+	}
+	lore.force_probability = true
+	var names := func(hits: Array) -> PackedStringArray:
+		var n := PackedStringArray()
+		for e in hits:
+			n.append(str(e.get("name", "")))
+		return n
+	var h1 := lore.scan([], "今晚的桂花糕真香")
+	_ok("and_any" in names.call(h1), "selective and_any hits with one secondary")
+	_ok("never" not in names.call(h1), "probability 0 never activates")
+	var h1b := lore.scan([], "桂花开了")
+	_ok("and_any" not in names.call(h1b), "selective and_any misses without secondary")
+	var h2 := lore.scan([], "我承诺在月色下请你喝茶")
+	_ok("and_all" in names.call(h2), "selective and_all needs every secondary")
+	var h2b := lore.scan([], "我承诺看月色")
+	_ok("and_all" not in names.call(h2b), "and_all fails if a secondary is missing")
+	var h3 := lore.scan([], "去灵田走走")
+	_ok("not_any" in names.call(h3), "not_any passes when secondary absent")
+	var h3b := lore.scan([], "灵田里打架可不行")
+	_ok("not_any" not in names.call(h3b), "not_any blocked by secondary")
+	var hist: Array = [
+		{"role": "user", "content": "旧词只出现在很早以前"},
+		{"role": "assistant", "content": "嗯"},
+		{"role": "user", "content": "今天去云籍阁吧"},
+	]
+	var hd := lore.scan(hist, "再看看", 2)
+	_ok("depth_old" not in names.call(hd), "scan_depth skips older turns")
+	_ok("at_depth" in names.call(hd), "at_depth entry still triggers from recent text")
+	var tight := lore.scan([], "桂花糕 承诺 月色 茶 灵田 云籍阁")
+	var tokens := 0
+	for e in tight:
+		tokens += ChatLorebook.estimate_tokens(str(e.get("content", "")))
+	_ok(tokens <= 40 + 20, "token budget still caps insertions (%d)" % tokens)
+	# 角色书合并
+	lore.add_character_book({"token_budget": 0, "entries": [{"id": "char1", "name": "角色书", "keys": ["小云"], "content": "她袖里的小云。", "enabled": true, "position": "after_char"}]})
+	var hc := lore.scan([], "小云钻出来了")
+	_ok("角色书" in names.call(hc), "per-character lorebook merges")
+
+
+func _test_memory_p2() -> void:
+	print("== memory P2 ==")
+	var mem := ChatMemory.new()
+	mem.open("_test_chat_p2")
+	mem.data["messages"] = []
+	mem.data["summary"] = ""
+	mem.data["facts"] = []
+	mem.merge_fact({"kind": "like", "text": "玩家喜欢桂花糕", "keys": ["桂花糕", "喜欢"]})
+	mem.merge_fact({"kind": "promise", "text": "答应下次一起看月", "keys": ["月"]})
+	mem.merge_fact({"kind": "like", "text": "玩家喜欢桂花糕", "keys": ["桂花糕"]})
+	_ok(mem.facts().size() == 2, "structured facts dedupe")
+	var hit := mem.retrieve("今晚想吃桂花糕")
+	var blob := mem.format_facts_block(hit)
+	_ok(blob.find("桂花糕") >= 0, "keyword retrieval injects like")
+	_ok(mem.delete_fact(str(mem.facts()[0].get("id", ""))), "delete fact")
+	_ok(mem.facts().size() == 1, "fact removed")
+	mem.apply_llm_summary("你们第一次谈到桂花糕。")
+	_ok(mem.summary().find("桂花糕") >= 0, "llm summary stored")
+	_ok(not mem.needs_llm_summary(), "pending flag cleared")
+	var profile := ChatProfile.new()
+	profile.local_path = "user://chat/_test_persona_local.json"
+	profile.profile_path = "user://chat/_test_profile.json"
+	profile.save_persona({"name": "测试道友", "birthday": "05-20"})
+	_ok(str(profile.load_persona().get("name", "")) == "测试道友", "local persona override")
+	profile.add_shared_fact({"kind": "name", "text": "玩家希望被叫作测试道友", "keys": ["测试道友"]})
+	_ok(profile.shared_facts().size() == 1, "shared profile fact")
+	DirAccess.remove_absolute(OS.get_user_data_dir().path_join("chat/_test_chat_p2.json"))
+	DirAccess.remove_absolute(OS.get_user_data_dir().path_join("chat/_test_persona_local.json"))
+	DirAccess.remove_absolute(OS.get_user_data_dir().path_join("chat/_test_profile.json"))
+
+
+func _test_events_p2() -> void:
+	print("== events P2 ==")
+	var a := ChatAnniversary.new()
+	a.claims_path = "user://chat/_test_event_claims.json"
+	a.persona = {"name": "道友", "birthday": ""}
+	a.custom = []
+	a.claims = {}
+	a.festivals = {
+		"fixed": [{"id": "yuandan", "title": "元旦", "month": 1, "day": 1, "hint": "新年好"}],
+		"lunar": [{"id": "chunjie", "title": "春节", "dates": {"2026": "02-17"}, "hint": "拜年"}],
+	}
+	var fest := a.due_today({"year": 2026, "month": 2, "day": 17}, 0)
+	var types := PackedStringArray()
+	for e in fest:
+		types.append(str(e.get("type", "")))
+		types.append(str(e.get("id", "")))
+	_ok("festival" in types and "chunjie" in types, "spring festival table")
+	var y := a.due_today({"year": 2026, "month": 1, "day": 1}, 0)
+	_ok(not y.is_empty() and str(y[0].get("id", "")) == "yuandan", "yuan dan fixed date")
+	var bond_at := Time.get_unix_time_from_datetime_dict({"year": 2024, "month": 11, "day": 14, "hour": 8, "minute": 0, "second": 0})
+	var evb := a.due_today({"year": 2026, "month": 11, "day": 14}, 0, {"recruited_at": int(bond_at)})
+	var tb := PackedStringArray()
+	for e in evb:
+		tb.append(str(e.get("type", "")))
+	_ok("bond_day" in tb, "结缘日 anniversary")
+	var evs := a.due_today({"year": 2026, "month": 3, "day": 1}, 0, {"streak": 30})
+	var ts := PackedStringArray()
+	for e in evs:
+		ts.append(str(e.get("id", "")))
+	_ok("streak:7" in ts and "streak:30" in ts, "streak milestones 7 and 30")
+	_ok("streak:100" not in ts, "higher streak not due")
+	a.claim(evs[0])
+	var again := a.unclaimed_today({"year": 2026, "month": 3, "day": 1}, 0, {"streak": 30})
+	var ts2 := PackedStringArray()
+	for e in again:
+		ts2.append(str(e.get("key", "")))
+	_ok(str(evs[0].get("key", "")) not in ts2, "claimed event hidden for the year")
+	a.ignore_asked_flag = true
+	_ok(a.birthday_prompt_needed(), "ask birthday when unset")
+	DirAccess.remove_absolute(OS.get_user_data_dir().path_join("chat/_test_event_claims.json"))
+
+
+func _test_registry() -> void:
+	print("== registry ==")
+	var reg := ChatRegistry.new()
+	reg.load_default()
+	_ok("persona" in reg.order and "memory" in reg.order and "events" in reg.order, "module order json loaded")
+	var asm := ChatPromptAssembler.new()
+	var packed := asm.assemble("chatgpt", [{"role": "user", "content": "你好"}], "看看这张图", null, "", 3500, [{"kind": "image", "description": "一只白猫趴在灯下"}])
+	var sys := str(packed["messages"][0].get("content", ""))
+	_ok(sys.find("白猫") >= 0 or sys.find("图") >= 0, "multimodal section injected")
+	_ok(int(packed["meta"].get("sections", 0)) > 0, "assembler reports sections")
+	_ok(FileAccess.file_exists("res://data/chat/module_order.json"), "order config in repo")
+	_ok(ChatConfig.new().worker_path("/v1/memory/extract").ends_with("/v1/memory/extract"), "extract url")
+	_ok(ChatConfig.new().worker_path("/v1/vision").find("/v1/vision") >= 0, "vision url")
+	_ok(ChatConfig.new().worker_path("/v1/stt").find("/v1/stt") >= 0, "stt url")

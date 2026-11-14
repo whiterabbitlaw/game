@@ -12,6 +12,9 @@ var _gemini_model: LineEdit
 var _gemini_key: LineEdit
 var _openai_box: VBoxContainer
 var _gemini_box: VBoxContainer
+var _persona_name: LineEdit
+var _persona_birthday: LineEdit
+var profile := ChatProfile.new()
 
 
 func build() -> Control:
@@ -62,6 +65,18 @@ func build() -> Control:
 	_gemini_box.add_child(_gemini_key)
 	root.add_child(_gemini_box)
 	_sync_vis()
+	root.add_child(UI.lbl("玩家人设（只存在本机）", 24, UI.INK, true))
+	var ph := UI.lbl("生日可填 YYYY-MM-DD 或每年 MM-DD。也可以在畅聊里自然告诉她，抽取后会写进档案。", 18, UI.INK_SOFT)
+	ph.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	ph.custom_minimum_size = Vector2(560, 0)
+	root.add_child(ph)
+	var persona := profile.load_persona()
+	root.add_child(UI.lbl("怎么称呼你", 22, UI.INK, true))
+	_persona_name = _edit(str(persona.get("name", "道友")), "道友")
+	root.add_child(_persona_name)
+	root.add_child(UI.lbl("生日", 22, UI.INK, true))
+	_persona_birthday = _edit(str(persona.get("birthday", "")), "YYYY-MM-DD 或 MM-DD")
+	root.add_child(_persona_birthday)
 	return root
 
 
@@ -82,6 +97,11 @@ func save() -> void:
 	cfg.gemini_model = _gemini_model.text.strip_edges()
 	cfg.gemini_api_key = _gemini_key.text.strip_edges()
 	cfg.save()
+	if _persona_name or _persona_birthday:
+		profile.save_persona({
+			"name": _persona_name.text.strip_edges() if _persona_name else "",
+			"birthday": _persona_birthday.text.strip_edges() if _persona_birthday else "",
+		})
 
 
 func _sync_vis() -> void:

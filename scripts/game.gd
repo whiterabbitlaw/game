@@ -93,6 +93,10 @@ func reset_all() -> void:
 func is_recruited(id: String) -> bool:
 	return s["chars"].has(id)
 
+
+func recruited_at(id: String) -> int:
+	return int(cdata(id).get("recruited_at", 0))
+
 func recruited_ids() -> Array:
 	var a: Array = []
 	for c in Data.CHARS:
@@ -126,7 +130,7 @@ func recruit(id: String, free: bool = false) -> bool:
 		toast.emit("灵石不足，需要 %d 灵石" % cost)
 		return false
 	s["stone"] -= cost
-	s["chars"][id] = {"lv": 1, "bond": 0.0, "daily": {"date": "", "chat": 0, "tea": 0, "star": 0, "gift": 0, "poke": 0}}
+	s["chars"][id] = {"lv": 1, "bond": 0.0, "recruited_at": int(Time.get_unix_time_from_system()), "daily": {"date": "", "chat": 0, "tea": 0, "star": 0, "gift": 0, "poke": 0}}
 	if s["main"] == "":
 		s["main"] = id
 	changed.emit()

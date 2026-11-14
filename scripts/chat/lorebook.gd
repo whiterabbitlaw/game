@@ -5,8 +5,11 @@ extends RefCounted
 
 const DEFAULT_PATH := "res://data/chat/lorebook.json"
 
+const CHAR_LORE_DIR := "res://data/chat/lore/"
+
 var book: Dictionary = {}
 var extra_books: Array = []
+var force_probability := false  # 测试时为 true 则忽略 probability 随机
 
 
 func load_default() -> void:
@@ -18,6 +21,18 @@ func add_character_book(character_book: Dictionary) -> void:
 	if character_book.is_empty():
 		return
 	extra_books.append(character_book)
+
+
+func load_character(char_id: String) -> void:
+	## 额外的角色世界书文件（与角色卡内 character_book 并存）。文件不存在则跳过。
+	if char_id.strip_edges() == "":
+		return
+	var path := CHAR_LORE_DIR + char_id + ".json"
+	if not FileAccess.file_exists(path):
+		return
+	var extra := _load_json(path)
+	if not extra.is_empty():
+		add_character_book(extra)
 
 
 func scan(history: Array, user_text: String = "", scan_depth_override: int = -1) -> Array:
@@ -112,34 +127,107 @@ func _activate_into(entries: Array, hay: String, activated: Array, seen: Diction
 		var key := _entry_id(e)
 		if seen.has(key):
 			continue
-		if bool(e.get("constant", false)) or _keys_match(e, hay, hay_l):
+		if bool(e.get("constant", false)):
+			if _passes_probability(e):
+				seen[key] = true
+				activated.append(e)
+			continue
+		if _keys_match(e, hay, hay_l) and _passes_probability(e):
 			seen[key] = true
 			activated.append(e)
 
 
+func _passes_probability(e: Dictionary) -> bool:
+	var p := int(e.get("probability", 100))
+	if p >= 100:
+		return true
+	if p <= 0:
+		return false
+	if force_probability:
+		return true
+	return randi() % 100 < p
+
+
+func _wants_whole_words(e: Dictionary) -> bool:
+	if e.has("match_whole_words"):
+		return bool(e.get("match_whole_words"))
+	var ext: Variant = book.get("extensions", {})
+	if typeof(ext) == TYPE_DICTIONARY:
+		var q: Variant = ext.get("qiyunju", {})
+		if typeof(q) == TYPE_DICTIONARY:
+			return bool(q.get("match_whole_words", false))
+	return false
+
+
 func _keys_match(e: Dictionary, hay: String, hay_l: String) -> bool:
 	var case_sens := bool(e.get("case_sensitive", false))
-	if not _any_key(e.get("keys", []), hay, hay_l, case_sens):
+	var whole := _wants_whole_words(e)
+	var primary := _any_key(e.get("keys", []), hay, hay_l, case_sens, whole)
+	var logic := str(e.get("selective_logic", "")).strip_edges().to_lower()
+	var selective := bool(e.get("selective", false)) or logic != ""
+	if not selective:
+		return primary
+	if logic == "":
+		logic = "and_any"
+	match logic:
+		"or":
+			return primary or _any_key(e.get("secondary_keys", []), hay, hay_l, case_sens, whole)
+		"not", "not_any", "and_not":
+			return primary and not _any_key(e.get("secondary_keys", []), hay, hay_l, case_sens, whole)
+		"and_all", "and":
+			return primary and _all_keys(e.get("secondary_keys", []), hay, hay_l, case_sens, whole)
+		"not_all":
+			return primary and not _all_keys(e.get("secondary_keys", []), hay, hay_l, case_sens, whole)
+		_:
+			# and_any：主键任一命中，且副键任一命中（SillyTavern 默认）
+			return primary and _any_key(e.get("secondary_keys", []), hay, hay_l, case_sens, whole)
+
+
+func _contains(hay: String, hay_l: String, needle: String, case_sens: bool, whole: bool) -> bool:
+	if needle.is_empty():
 		return false
-	if bool(e.get("selective", false)):
-		return _any_key(e.get("secondary_keys", []), hay, hay_l, case_sens)
-	return true
+	if whole:
+		return _whole_word(hay if case_sens else hay_l, needle if case_sens else needle.to_lower())
+	if case_sens:
+		return hay.find(needle) >= 0
+	return hay_l.find(needle.to_lower()) >= 0
 
 
-func _any_key(keys: Variant, hay: String, hay_l: String, case_sens: bool) -> bool:
+func _is_word_char(cp: int) -> bool:
+	return (cp >= 48 and cp <= 57) or (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or cp == 95
+
+
+func _whole_word(hay: String, needle: String) -> bool:
+	var i := 0
+	while true:
+		var at := hay.find(needle, i)
+		if at < 0:
+			return false
+		var left_ok := at == 0 or not _is_word_char(hay.unicode_at(at - 1))
+		var right := at + needle.length()
+		var right_ok := right >= hay.length() or not _is_word_char(hay.unicode_at(right))
+		if left_ok and right_ok:
+			return true
+		i = at + 1
+	return false
+
+
+func _any_key(keys: Variant, hay: String, hay_l: String, case_sens: bool, whole: bool = false) -> bool:
 	if typeof(keys) != TYPE_ARRAY:
 		return false
 	for k in keys:
-		var needle := str(k)
-		if needle.is_empty():
-			continue
-		if case_sens:
-			if hay.find(needle) >= 0:
-				return true
-		else:
-			if hay_l.find(needle.to_lower()) >= 0:
-				return true
+		if _contains(hay, hay_l, str(k), case_sens, whole):
+			return true
 	return false
+
+
+func _all_keys(keys: Variant, hay: String, hay_l: String, case_sens: bool, whole: bool = false) -> bool:
+	if typeof(keys) != TYPE_ARRAY or (keys as Array).is_empty():
+		return false
+	for k in keys:
+		if not _contains(hay, hay_l, str(k), case_sens, whole):
+			return false
+	return true
 
 
 func _apply_budget(activated: Array, budget: int) -> Array:

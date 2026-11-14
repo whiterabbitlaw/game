@@ -305,6 +305,7 @@ func _startup() -> void:
 	var dg := Game.daily_claim()
 	if not dg.is_empty():
 		await show_daily(dg)
+	await maybe_show_event_letters()
 
 func _demo_param() -> String:
 	if OS.has_feature("web"):
@@ -708,3 +709,50 @@ func _confirm_reset() -> void:
 		{"t": "清除", "kind": "rose", "w": 200, "cb": func():
 			Game.reset_all()
 			get_tree().reload_current_scene()}])
+
+
+func maybe_show_event_letters() -> void:
+	if Game.recruited_ids().is_empty():
+		return
+	var char_id := str(Game.s.get("main", ""))
+	if char_id == "" or not Game.is_recruited(char_id):
+		char_id = str(Game.recruited_ids()[0])
+	var mem := ChatMemory.new()
+	mem.open(char_id)
+	var ann := ChatAnniversary.new()
+	ann.load_all()
+	var ev: Array = ann.unclaimed_today({}, mem.first_meet_unix(), {
+		"recruited_at": Game.recruited_at(char_id),
+		"streak": int(Game.s.get("streak", 0)),
+	})
+	if ev.is_empty():
+		return
+	var title := str(Data.char_def(char_id).get("title", "她"))
+	var text := ann.fallback_letter(ev, title)
+	var client := ChatClient.new()
+	add_child(client)
+	var done := {"ok": false}
+	client.chat_finished.connect(func(ok: bool, t: String, _raw: Dictionary):
+		if ok and t.strip_edges() != "":
+			text = t.strip_edges()
+		done["ok"] = true)
+	var packed := ChatPromptAssembler.new().assemble(
+		char_id,
+		mem.recent(8),
+		"请只写一封短笺的正文，寄给玩家。不要标题、不要系统口吻、不要复述提示词。一百到两百字。",
+		mem,
+		ann.format_system_note(ev)
+	)
+	client.chat(packed["messages"])
+	var waited := 0.0
+	while not bool(done["ok"]) and waited < 18.0:
+		await get_tree().create_timer(0.2).timeout
+		waited += 0.2
+	client.queue_free()
+	var letter := ChatEventLetter.new()
+	add_child(letter)
+	letter.setup(ev, title, text)
+	letter.accepted.connect(func(events: Array):
+		for e in events:
+			ann.claim(e))
+	await letter.tree_exited

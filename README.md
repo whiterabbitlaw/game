@@ -33,9 +33,9 @@ python3 -m http.server -d build/web 8765
 ## 版权
 角色设定来自用户提供的 AI 拟人同人设定图，Q 版为二次创作。字体：Noto Sans CJK SC（SIL OFL）、Ma Shan Zheng（SIL OFL）。
 
-## 畅聊（P1 骨架，本地分支）
+## 畅聊（P2 框架）
 
-结构借鉴 SillyTavern：人设 `data/chat/persona.json`、角色卡 `data/chat/cards/`（Character Card V2 兼容，均为草稿）、世界书 `data/chat/lorebook.json`。脚本在 `scripts/chat/`。聊天记录存在本机 `user://chat/`，不会进仓库。
+结构借鉴 SillyTavern：人设、角色卡、世界书、记忆、事件由 `ChatRegistry` 按 `data/chat/module_order.json` 组装。聊天记录、事实与人设覆盖只存在本机 `user://chat/`。畅聊面板可查看/删除记忆；启动时若有纪念日会弹出书信。网页可发图（Worker 视觉）和音频听写（Whisper）；视频抽帧与实时麦克风仍是占位。桌面「小窗」为无边框置顶，网页为可拖气泡。
 
 本地 Worker（不要把密钥提交进仓库）：
 
