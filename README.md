@@ -33,9 +33,15 @@ python3 -m http.server -d build/web 8765
 ## 版权
 角色设定来自用户提供的 AI 拟人同人设定图，Q 版为二次创作。字体：Noto Sans CJK SC（SIL OFL）、Ma Shan Zheng（SIL OFL）。
 
-## 畅聊（P2 框架）
+## 畅聊（P3：实时语音 + 悬浮窗）
 
-结构借鉴 SillyTavern：人设、角色卡、世界书、记忆、事件由 `ChatRegistry` 按 `data/chat/module_order.json` 组装。聊天记录、事实与人设覆盖只存在本机 `user://chat/`。畅聊面板可查看/删除记忆；启动时若有纪念日会弹出书信。网页可发图（Worker 视觉）和音频听写（Whisper）；视频抽帧与实时麦克风仍是占位。桌面「小窗」为无边框置顶，网页为可拖气泡。
+结构借鉴 SillyTavern：人设、角色卡、世界书、记忆、事件由 `ChatRegistry` 按 `data/chat/module_order.json` 组装。聊天记录、事实与人设覆盖只存在本机 `user://chat/`。畅聊面板可查看/删除记忆；启动时若有纪念日会弹出书信。
+
+- **实时语音**：面板里「按住说」或「免提」。网页用麦克风（getUserMedia + 能量 VAD）录成 16 kHz WAV，送到 Worker `/v1/stt`（Whisper，`language=zh`），再聊天；回复按句切开发到 MeloTTS，边合成边播放，开口可打断。状态显示「正在听 / 正在想 / 正在说」。桌面用 `AudioEffectCapture`。浏览器需允许麦克风；站点必须是 HTTPS 或 localhost。
+- **看图 / 视频 / 听写文件**：图片走 `/v1/vision`；视频在网页里本地抽 3–4 帧再逐帧看图并合并摘要（桌面请用网页版）；也可选一段音频文件听写。
+- **悬浮窗**：网页可安装为 PWA（添加到主屏幕）。手机自动用紧凑可拖气泡。桌面 Chrome 可用「画中画」置顶小窗。桌面应用「小窗」仍是无边框置顶。Android 原生 overlay 见 `android/README.md`（缺 JDK/SDK/keystore，仅脚手架，不上架）。
+
+导出网页到 GitHub Pages：`bash tools/export_docs.sh`。Cloudflare Pages：`bash tools/build_cloudflare.sh`。
 
 本地 Worker（不要把密钥提交进仓库）：
 

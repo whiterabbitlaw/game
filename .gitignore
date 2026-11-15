@@ -3,3 +3,4 @@ build/
 tools/chat-worker/node_modules/
 tools/chat-worker/.wrangler/
 tools/chat-worker/.dev.vars
+docs/*.import

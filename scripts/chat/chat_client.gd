@@ -5,6 +5,7 @@ extends Node
 
 signal chat_finished(ok: bool, text: String, raw: Dictionary)
 signal tts_finished(ok: bool, bytes: PackedByteArray)
+signal tts_chunk_ready(ok: bool, bytes: PackedByteArray, text: String)
 signal summarize_finished(ok: bool, text: String, raw: Dictionary)
 signal extract_finished(ok: bool, facts: Array, raw: Dictionary)
 signal vision_finished(ok: bool, text: String, raw: Dictionary)
@@ -19,6 +20,10 @@ var _mode := ""
 var _kind := ""
 var _bg_mode := ""
 var _bg_queue: Array = []
+var _tts_http: HTTPRequest
+var _tts_busy := false
+var _tts_q: Array = []
+var _tts_cur := ""
 
 
 func _ready() -> void:
@@ -31,6 +36,10 @@ func _ready() -> void:
 	_bg.timeout = 90.0
 	add_child(_bg)
 	_bg.request_completed.connect(_on_bg_done)
+	_tts_http = HTTPRequest.new()
+	_tts_http.timeout = 60.0
+	add_child(_tts_http)
+	_tts_http.request_completed.connect(_on_tts_http)
 
 
 func reload_config() -> void:
@@ -53,14 +62,65 @@ func chat(messages: Array) -> void:
 
 
 func tts(text: String, lang: String = "ZH") -> void:
+	tts_clear()
+	tts_push(text, lang)
+
+
+func tts_push(text: String, lang: String = "ZH") -> void:
 	reload_config()
-	if _busy or not cfg.tts_enabled or text.strip_edges() == "":
-		tts_finished.emit(false, PackedByteArray())
+	if not cfg.tts_enabled or text.strip_edges() == "":
 		return
-	_mode = "tts"
-	_kind = ChatConfig.PROVIDER_WORKER
-	_busy = true
-	_request(cfg.worker_tts_url(), PackedStringArray(["Content-Type: application/json", "Accept: application/json"]), {"text": text, "lang": lang})
+	_tts_q.append({"text": text.strip_edges(), "lang": lang})
+	_kick_tts()
+
+
+func tts_clear() -> void:
+	_tts_q.clear()
+	_tts_cur = ""
+	if _tts_busy and _tts_http:
+		_tts_http.cancel_request()
+		_tts_busy = false
+
+
+func tts_pending() -> bool:
+	return _tts_busy or not _tts_q.is_empty()
+
+
+func _kick_tts() -> void:
+	if _tts_busy or _tts_q.is_empty() or _tts_http == null:
+		return
+	var job: Dictionary = _tts_q.pop_front()
+	_tts_cur = str(job.get("text", ""))
+	_tts_busy = true
+	var err := _tts_http.request(
+		cfg.worker_tts_url(),
+		PackedStringArray(["Content-Type: application/json", "Accept: application/json"]),
+		HTTPClient.METHOD_POST,
+		JSON.stringify({"text": _tts_cur, "lang": str(job.get("lang", "ZH"))})
+	)
+	if err != OK:
+		_tts_busy = false
+		tts_chunk_ready.emit(false, PackedByteArray(), _tts_cur)
+		tts_finished.emit(false, PackedByteArray())
+		_kick_tts()
+
+
+func _on_tts_http(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_tts_busy = false
+	var text := _tts_cur
+	_tts_cur = ""
+	var ok := result == HTTPRequest.RESULT_SUCCESS and code >= 200 and code < 300
+	var bytes := PackedByteArray()
+	if ok:
+		var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+		if typeof(parsed) == TYPE_DICTIONARY:
+			var b64 := str(parsed.get("audio", ""))
+			if b64 != "":
+				bytes = Marshalls.base64_to_raw(b64)
+	ok = ok and bytes.size() > 0
+	tts_chunk_ready.emit(ok, bytes, text)
+	tts_finished.emit(ok, bytes)
+	_kick_tts()
 
 
 func summarize(messages: Array) -> void:
@@ -78,8 +138,8 @@ func vision(image_b64: String, prompt: String = "", mime: String = "image/jpeg")
 	_enqueue_bg("vision", cfg.worker_path("/v1/vision"), body)
 
 
-func stt(audio_b64: String, format: String = "wav") -> void:
-	_enqueue_bg("stt", cfg.worker_path("/v1/stt"), {"audio": audio_b64, "format": format})
+func stt(audio_b64: String, format: String = "wav", language: String = "zh") -> void:
+	_enqueue_bg("stt", cfg.worker_path("/v1/stt"), {"audio": audio_b64, "format": format, "language": language})
 
 
 func _enqueue_bg(mode: String, url: String, body: Dictionary) -> void:

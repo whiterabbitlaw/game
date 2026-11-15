@@ -18,6 +18,7 @@ Voice="*res://scripts/voice.gd"
 
 buses/default_bus_layout="res://default_bus_layout.tres"
 driver/output_latency.web=90
+driver/enable_input=true
 
 [display]
 

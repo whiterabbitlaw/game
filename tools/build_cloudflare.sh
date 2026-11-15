@@ -1,7 +1,8 @@
 #!/bin/bash
 # Cloudflare Pages 单文件上限 25MiB：主包不含配音（WebLite），配音单独成 voices.pck，wasm 以 .gz 存放并由 index.html 里的小脚本解压。
 set -e
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
 G=${GODOT:-/workspace/tools/Godot_v4.7.2-stable_linux.x86_64}
 rm -rf build/web_lite && mkdir -p build/web_lite
 $G --headless --path . --export-release WebLite build/web_lite/index.html
@@ -19,4 +20,5 @@ return of(i,o);};})();
 '''
 open('index.html','w',encoding='utf-8').write(s.replace('</head>',patch+'</head>',1))
 PY
+python3 "$SCRIPT_DIR/inject_pwa.py" .
 echo "output: build/cf"

@@ -251,7 +251,8 @@ async function handleStt(request, env, origin) {
     return json(origin, { error: "invalid audio base64" }, 400);
   }
   if (bin.length > 1_200_000) return json(origin, { error: "audio too large" }, 413);
-  const result = await env.AI.run(STT_MODEL, { audio: Array.from(bin) });
+  const language = String(body.language || body.lang || "zh").trim() || "zh";
+  const result = await env.AI.run(STT_MODEL, { audio: Array.from(bin), language });
   const text = (result && (result.text || result.result?.text)) || extractText(result);
   return json(origin, { text: String(text || "").trim(), model: STT_MODEL, format: body.format || "" });
 }

@@ -1,6 +1,6 @@
 class_name ChatPanel
 extends Control
-## 畅聊面板：打字发送，可选 TTS。含记忆编辑、图片/听写脚手架、小窗模式。
+## 畅聊面板：打字发送，实时语音（按住说 / 免提），逐句 TTS，网页抽帧看视频，PWA / 画中画小窗。
 
 var main: Control
 var char_id := ""
@@ -9,6 +9,7 @@ var memory := ChatMemory.new()
 var anniversary := ChatAnniversary.new()
 var client: ChatClient
 var player: AudioStreamPlayer
+var voice: ChatVoiceSession
 
 var log_box: VBoxContainer
 var scroll: ScrollContainer
@@ -17,6 +18,8 @@ var send_btn: Button
 var status_lbl: Label
 var tts_btn: Button
 var title_lbl: Label
+var ptt_btn: Button
+var hands_btn: Button
 var attach: ChatAttach
 var _note := ""
 var _waiting := false
@@ -30,6 +33,11 @@ var _saved_win_size := Vector2i.ZERO
 var _saved_win_pos := Vector2i.ZERO
 var _saved_borderless := false
 var _saved_on_top := false
+var _play_q: Array = []
+var _voice_stt := false
+var _vision_expect := 0
+var _vision_parts: PackedStringArray = PackedStringArray()
+var _hint: Label
 
 
 func open_chat(id: String) -> void:
@@ -49,6 +57,7 @@ func open_chat(id: String) -> void:
 	memory.maybe_roll_summary()
 	_build()
 	_hydrate()
+	_maybe_phone_compact()
 
 
 func _build() -> void:
@@ -91,12 +100,11 @@ func _build() -> void:
 	var minib := UI.btn("小窗", "ghost", 22, Vector2(90, 52))
 	minib.pressed.connect(toggle_mini)
 	head.add_child(minib)
-	# 让标题栏可拖（网页气泡 / 桌面无边框）
 	head.gui_input.connect(_on_head_gui)
-	var hint := UI.lbl("每句话都会记在本机。可点「记忆」查看或删除。网页发图走文件选择；视频抽帧稍后接入。", 18, UI.INK_SOFT)
-	hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-	hint.custom_minimum_size = Vector2(620, 0)
-	root.add_child(hint)
+	_hint = UI.lbl("每句话都会记在本机。可按住说话或开免提；她会逐句读出来，你开口就能打断。网页可发图、抽视频帧，也可安装到主屏。", 18, UI.INK_SOFT)
+	_hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	_hint.custom_minimum_size = Vector2(620, 0)
+	root.add_child(_hint)
 	scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.custom_minimum_size = Vector2(620, 760)
@@ -122,20 +130,38 @@ func _build() -> void:
 	send_btn = UI.btn("发送", "jade", 26, Vector2(130, 56))
 	send_btn.pressed.connect(_send)
 	row.add_child(send_btn)
+	var vrow := HBoxContainer.new()
+	vrow.add_theme_constant_override("separation", 8)
+	root.add_child(vrow)
+	ptt_btn = UI.btn("按住说", "ghost", 22, Vector2(150, 56))
+	ptt_btn.button_down.connect(_on_ptt_down)
+	ptt_btn.button_up.connect(_on_ptt_up)
+	vrow.add_child(ptt_btn)
+	hands_btn = UI.btn("免提", "ghost", 22, Vector2(110, 56))
+	hands_btn.pressed.connect(_toggle_handsfree)
+	vrow.add_child(hands_btn)
+	if OS.has_feature("web"):
+		var pipb := UI.btn("画中画", "ghost", 22, Vector2(110, 56))
+		pipb.pressed.connect(func():
+			if voice:
+				voice.open_pip())
+		vrow.add_child(pipb)
+	var mrow := HBoxContainer.new()
+	mrow.add_theme_constant_override("separation", 8)
+	root.add_child(mrow)
 	var imgb := UI.btn("图片", "ghost", 22, Vector2(90, 56))
 	imgb.pressed.connect(func(): attach.pick_image())
-	row.add_child(imgb)
+	mrow.add_child(imgb)
 	var sttb := UI.btn("听写", "ghost", 22, Vector2(90, 56))
 	sttb.pressed.connect(func(): attach.pick_audio())
-	row.add_child(sttb)
+	mrow.add_child(sttb)
 	var vidb := UI.btn("视频", "ghost", 22, Vector2(90, 56))
-	vidb.pressed.connect(func():
-		_set_status("视频将在本地抽帧后再看，这一步稍后接入。"))
-	row.add_child(vidb)
+	vidb.pressed.connect(_pick_video)
+	mrow.add_child(vidb)
 	client = ChatClient.new()
 	add_child(client)
 	client.chat_finished.connect(_on_chat)
-	client.tts_finished.connect(_on_tts)
+	client.tts_chunk_ready.connect(_on_tts_chunk)
 	client.summarize_finished.connect(_on_summarize)
 	client.extract_finished.connect(_on_extract)
 	client.vision_finished.connect(_on_vision)
@@ -143,13 +169,24 @@ func _build() -> void:
 	attach = ChatAttach.new()
 	add_child(attach)
 	attach.file_picked.connect(_on_file)
-	attach.cancelled.connect(func(): _set_status("没有选择文件。"))
+	attach.cancelled.connect(func():
+		if not OS.has_feature("web") and status_lbl and status_lbl.text.begins_with("正在"):
+			return
+		_set_status("没有选择文件。"))
+	voice = ChatVoiceSession.new()
+	add_child(voice)
+	voice.utterance_ready.connect(_on_utterance)
+	voice.state_changed.connect(_on_voice_state)
+	voice.error_text.connect(func(msg: String): _set_status(msg))
+	voice.frames_ready.connect(_on_video_frames)
+	voice.pip_event.connect(_on_pip_event)
 	_sync_tts_btn()
 	_maybe_background_memory()
 	player = AudioStreamPlayer.new()
 	if AudioServer.get_bus_index("Voice") >= 0:
 		player.bus = "Voice"
 	player.playback_type = AudioServer.PLAYBACK_TYPE_DEFAULT
+	player.finished.connect(_on_player_finished)
 	add_child(player)
 
 
@@ -174,11 +211,14 @@ func _send() -> void:
 	if text == "" or _waiting:
 		return
 	input.text = ""
+	_interrupt_speech()
 	memory.append("user", text)
 	_bubble("user", text)
 	_waiting = true
 	send_btn.disabled = true
-	_set_status("正在请她想一想……")
+	if voice:
+		voice.set_state(ChatVoiceSession.STATE_THINKING)
+	_set_status("正在想…")
 	var packed := assembler.assemble(char_id, memory.recent(30), text, memory, _note, ChatPromptAssembler.DEFAULT_BUDGET, _attachments)
 	_attachments = []
 	client.chat(packed["messages"])
@@ -189,6 +229,11 @@ func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
 	send_btn.disabled = false
 	if not ok:
 		_set_status(text)
+		if voice:
+			if voice.mode == "handsfree":
+				voice.set_state(ChatVoiceSession.STATE_LISTENING, "免提")
+			else:
+				voice.set_state(ChatVoiceSession.STATE_IDLE)
 		return
 	memory.append("assistant", text)
 	_bubble("assistant", text)
@@ -196,18 +241,76 @@ func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
 	memory.maybe_roll_summary()
 	_maybe_background_memory()
 	if client.cfg.tts_enabled:
-		client.tts(text, "ZH")
+		_speak_reply(text)
+	elif voice:
+		if voice.mode == "handsfree":
+			voice.set_state(ChatVoiceSession.STATE_LISTENING, "免提")
+		else:
+			voice.set_state(ChatVoiceSession.STATE_IDLE)
 	_scroll_to_end()
 
 
-func _on_tts(ok: bool, bytes: PackedByteArray) -> void:
+func _speak_reply(text: String) -> void:
+	_interrupt_speech()
+	var parts: PackedStringArray = ChatTextUtil.split_sentences(text)
+	if parts.is_empty():
+		if voice and voice.mode == "handsfree":
+			voice.set_state(ChatVoiceSession.STATE_LISTENING, "免提")
+		return
+	if voice:
+		voice.set_state(ChatVoiceSession.STATE_SPEAKING)
+		voice.set_tts_playing(true)
+	_set_status("正在说…")
+	for s in parts:
+		client.tts_push(s, "ZH")
+
+
+func _on_tts_chunk(ok: bool, bytes: PackedByteArray, _text: String) -> void:
 	if not ok or bytes.is_empty():
+		_kick_play()
 		return
 	var stream := _stream_from_audio_bytes(bytes)
-	if stream == null:
+	if stream:
+		_play_q.append(stream)
+	_kick_play()
+
+
+func _kick_play() -> void:
+	if player and player.playing:
 		return
-	player.stream = stream
+	if _play_q.is_empty():
+		if client == null or not client.tts_pending():
+			if voice:
+				voice.set_tts_playing(false)
+				if voice.mode == "handsfree":
+					voice.set_state(ChatVoiceSession.STATE_LISTENING, "免提")
+				else:
+					voice.set_state(ChatVoiceSession.STATE_IDLE)
+			if status_lbl and status_lbl.text.begins_with("正在说"):
+				_set_status("")
+		return
+	if player == null:
+		return
+	player.stream = _play_q.pop_front()
 	player.play()
+	if voice:
+		voice.set_tts_playing(true)
+		voice.set_state(ChatVoiceSession.STATE_SPEAKING)
+	_set_status("正在说…")
+
+
+func _on_player_finished() -> void:
+	_kick_play()
+
+
+func _interrupt_speech() -> void:
+	if client:
+		client.tts_clear()
+	_play_q.clear()
+	if player and player.playing:
+		player.stop()
+	if voice:
+		voice.set_tts_playing(false)
 
 
 func _stream_from_audio_bytes(bytes: PackedByteArray) -> AudioStream:
@@ -256,11 +359,68 @@ func _toggle_tts() -> void:
 	client.cfg.tts_enabled = not client.cfg.tts_enabled
 	client.cfg.save()
 	_sync_tts_btn()
+	if not client.cfg.tts_enabled:
+		_interrupt_speech()
 
 
 func _sync_tts_btn() -> void:
 	if tts_btn and client:
 		tts_btn.text = "语音开" if client.cfg.tts_enabled else "语音关"
+
+
+func _on_ptt_down() -> void:
+	_interrupt_speech()
+	if voice:
+		voice.ptt_down()
+
+
+func _on_ptt_up() -> void:
+	if voice:
+		voice.ptt_up()
+
+
+func _toggle_handsfree() -> void:
+	if voice == null:
+		return
+	if voice.mode == "handsfree" and voice.state != ChatVoiceSession.STATE_IDLE:
+		voice.stop_handsfree()
+		if hands_btn:
+			hands_btn.text = "免提"
+		return
+	_interrupt_speech()
+	voice.start_handsfree()
+	if hands_btn:
+		hands_btn.text = "免提中"
+
+
+func _on_voice_state(s: String, detail: String) -> void:
+	if s == ChatVoiceSession.STATE_LISTENING and detail == "打断":
+		_interrupt_speech()
+	match s:
+		ChatVoiceSession.STATE_LISTENING:
+			_set_status("正在听…" + (("（%s）" % detail) if detail != "" else ""))
+		ChatVoiceSession.STATE_THINKING:
+			_set_status("正在想…")
+		ChatVoiceSession.STATE_SPEAKING:
+			_set_status("正在说…")
+		ChatVoiceSession.STATE_IDLE:
+			if not _waiting and status_lbl and (status_lbl.text.begins_with("正在听") or status_lbl.text.begins_with("正在说") or status_lbl.text.begins_with("正在想")):
+				_set_status("")
+	if hands_btn and voice:
+		hands_btn.text = "免提中" if voice.mode == "handsfree" and s != ChatVoiceSession.STATE_IDLE else "免提"
+	_sync_pip_status()
+
+
+func _on_utterance(wav: PackedByteArray, _mime: String) -> void:
+	_interrupt_speech()
+	if wav.is_empty():
+		_set_status("没有录到声音。")
+		return
+	_voice_stt = true
+	if voice:
+		voice.set_state(ChatVoiceSession.STATE_THINKING)
+	_set_status("正在听写…")
+	client.stt(Marshalls.raw_to_base64(wav), "wav", "zh")
 
 
 func _bubble(role: String, text: String) -> void:
@@ -274,15 +434,23 @@ func _bubble(role: String, text: String) -> void:
 	vb.add_child(UI.lbl(who, 18, UI.INK_SOFT, true))
 	var body := UI.lbl(text, 24, color)
 	body.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-	body.custom_minimum_size = Vector2(580, 0)
+	body.custom_minimum_size = Vector2(580 if not _web_bubble and not _mini else 400, 0)
 	vb.add_child(body)
 	log_box.add_child(wrap)
 	_scroll_to_end()
+	if voice:
+		voice.update_pip({"role": role, "who": who, "line": text, "status": status_lbl.text if status_lbl else ""})
 
 
 func _set_status(t: String) -> void:
 	if status_lbl:
 		status_lbl.text = t
+	_sync_pip_status()
+
+
+func _sync_pip_status() -> void:
+	if voice:
+		voice.update_pip({"status": status_lbl.text if status_lbl else ""})
 
 
 func _scroll_to_end() -> void:
@@ -332,13 +500,26 @@ func _on_extract(ok: bool, facts: Array, _raw: Dictionary) -> void:
 		if not shared or kind == "promise":
 			memory.merge_fact(f)
 		elif kind == "like":
-			# 喜好同时记一份在当前角色下，方便检索
 			var cf: Dictionary = (f as Dictionary).duplicate()
 			cf["scope"] = "char"
 			memory.merge_fact(cf)
 
 
 func _on_vision(ok: bool, text: String, _raw: Dictionary) -> void:
+	if _vision_expect > 0:
+		var n := _vision_parts.size() + 1
+		var piece := text.strip_edges() if ok and text.strip_edges() != "" else "看不清"
+		_vision_parts.append("第%d帧：%s" % [n, piece])
+		_vision_expect -= 1
+		if _vision_expect == 0:
+			var summary := "这段视频里依次看到：\n" + "\n".join(_vision_parts)
+			_attachments.append({"kind": "video", "description": summary})
+			_set_status("她已经在看这段视频了。补一句要说的话，或直接发送。")
+			if input and input.text.strip_edges() == "":
+				input.text = "你看这段视频。"
+		else:
+			_set_status("正在看视频（%d 帧完成）…" % _vision_parts.size())
+		return
 	if not ok or text.strip_edges() == "":
 		_set_status(text if text != "" else "看图失败。")
 		return
@@ -349,8 +530,21 @@ func _on_vision(ok: bool, text: String, _raw: Dictionary) -> void:
 
 
 func _on_stt(ok: bool, text: String, _raw: Dictionary) -> void:
+	if _voice_stt:
+		_voice_stt = false
+		if not ok or text.strip_edges() == "":
+			_set_status(text if text != "" else "没听清，请再试一次。")
+			if voice and voice.mode == "handsfree":
+				voice.set_state(ChatVoiceSession.STATE_LISTENING, "免提")
+			elif voice:
+				voice.set_state(ChatVoiceSession.STATE_IDLE)
+			return
+		if input:
+			input.text = text.strip_edges()
+		_send()
+		return
 	if not ok or text.strip_edges() == "":
-		_set_status(text if text != "" else "听写失败。麦克风实时采集稍后接入，现在可先选一段音频文件。")
+		_set_status(text if text != "" else "听写失败。也可按住说话，或先选一段音频文件。")
 		return
 	if input:
 		if input.text.strip_edges() != "":
@@ -366,10 +560,68 @@ func _on_file(kind: String, bytes: PackedByteArray, mime: String, _name: String)
 	var b64 := Marshalls.raw_to_base64(bytes)
 	if kind == "audio":
 		_set_status("正在听写……")
-		client.stt(b64, mime)
+		client.stt(b64, "wav" if mime.find("wav") >= 0 else mime, "zh")
 	else:
 		_set_status("正在看图……")
 		client.vision(b64, "请用简体中文简要描述这张图片里有什么，不超过 120 字。", mime)
+
+
+func _pick_video() -> void:
+	if OS.has_feature("web"):
+		_set_status("请选择一段视频，将在本地抽 3–4 帧…")
+		if voice:
+			voice.pick_video()
+		elif attach:
+			attach.pick_video()
+		return
+	_set_status("视频抽帧目前在网页版可用，请用浏览器打开后再点「视频」。")
+
+
+func _on_video_frames(frames: Array, _name: String) -> void:
+	if frames.is_empty():
+		_set_status("没有抽到视频帧。")
+		return
+	_vision_parts = PackedStringArray()
+	_vision_expect = 0
+	var usable: Array = []
+	for fr in frames:
+		if typeof(fr) != TYPE_DICTIONARY:
+			continue
+		if str((fr as Dictionary).get("data", "")) == "":
+			continue
+		usable.append(fr)
+	if usable.is_empty():
+		_set_status("没有抽到视频帧。")
+		return
+	_vision_expect = usable.size()
+	_set_status("正在看视频（0/%d）…" % _vision_expect)
+	for fr2 in usable:
+		var fd: Dictionary = fr2
+		client.vision(str(fd.get("data", "")), "请用简体中文简要描述这一帧画面里有什么，不超过 80 字。不要评论拍摄质量。", str(fd.get("mime", "image/jpeg")))
+
+
+func _on_pip_event(event: String, payload: Dictionary) -> void:
+	match event:
+		"send":
+			var t := str(payload.get("text", "")).strip_edges()
+			if t == "":
+				return
+			if input:
+				input.text = t
+			_send()
+		"ptt_down":
+			_on_ptt_down()
+		"ptt_up":
+			_on_ptt_up()
+		"unsupported":
+			_set_status("当前浏览器不支持文档画中画。桌面 Chrome 可用；手机请用「小窗」气泡或把网页安装到主屏。")
+		"error":
+			_set_status(str(payload.get("message", "无法打开画中画")))
+		"opened":
+			_set_status("画中画小窗已打开。")
+			_sync_pip_status()
+		"closed":
+			pass
 
 
 func _open_memory() -> void:
@@ -407,6 +659,18 @@ func _apply_web_bubble() -> void:
 	_apply_compact_panel(_web_bubble)
 
 
+func _maybe_phone_compact() -> void:
+	var mobile := false
+	if OS.has_feature("mobile"):
+		mobile = true
+	elif OS.has_feature("web"):
+		var raw: Variant = JavaScriptBridge.eval("!!(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || (Math.min(window.innerWidth||9999, window.innerHeight||9999) < 560))", true)
+		mobile = str(raw) == "true" or raw == true or str(raw) == "1"
+	if mobile:
+		_web_bubble = true
+		_apply_compact_panel(true)
+
+
 func _apply_compact_panel(compact: bool) -> void:
 	if _panel == null:
 		for c in get_children():
@@ -419,12 +683,20 @@ func _apply_compact_panel(compact: bool) -> void:
 		_panel.position = Vector2(20, 200)
 		_panel.size = Vector2(460, 820)
 		if scroll:
-			scroll.custom_minimum_size = Vector2(420, 480)
+			scroll.custom_minimum_size = Vector2(420, 420)
+		if _hint:
+			_hint.custom_minimum_size = Vector2(420, 0)
+		if status_lbl:
+			status_lbl.custom_minimum_size = Vector2(420, 0)
 	else:
 		_panel.position = Vector2(20, 80)
 		_panel.size = Vector2(680, 1120)
 		if scroll:
 			scroll.custom_minimum_size = Vector2(620, 760)
+		if _hint:
+			_hint.custom_minimum_size = Vector2(620, 0)
+		if status_lbl:
+			status_lbl.custom_minimum_size = Vector2(620, 0)
 
 
 func _on_head_gui(event: InputEvent) -> void:
@@ -446,6 +718,9 @@ func _on_head_gui(event: InputEvent) -> void:
 
 
 func _exit_tree() -> void:
+	_interrupt_speech()
+	if voice:
+		voice.close_pip()
 	if _mini and not OS.has_feature("web"):
 		var win := get_window()
 		win.borderless = _saved_borderless

@@ -253,7 +253,7 @@ class _MultimodalModule extends ChatModule:
 			var kind := str(a.get("kind", "image"))
 			var desc := str(a.get("description", "")).strip_edges()
 			if kind == "video":
-				lines.append("（视频尚未逐帧解析，目前只是占位。）" + ((" 备注：" + desc) if desc != "" else ""))
+				lines.append("视频逐帧所见：" + (desc if desc != "" else "（尚无描述）"))
 			else:
 				lines.append("图片：" + (desc if desc != "" else "（尚无描述）"))
 		return [{"id": "multimodal", "placement": "system", "content": "\n".join(lines)}]

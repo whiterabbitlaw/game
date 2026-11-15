@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <title>栖云居 · 小窗</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    html, body { margin: 0; height: 100%; font-family: "Noto Sans SC", "PingFang SC", sans-serif; background: #1a1628; color: #2a2438; }
+    body { display: flex; flex-direction: column; }
+    header { background: #f7f0e6; padding: 10px 12px; font-weight: 600; color: #3d3358; border-bottom: 2px solid #c9a46a; }
+    #log { flex: 1; overflow: auto; padding: 8px; background: #efe6d8; }
+    .b { background: #fffdf8; margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; font-size: 14px; line-height: 1.45; }
+    .b.user { background: #e0f2ec; }
+    .who { font-size: 11px; color: #7a7088; margin-bottom: 2px; }
+    #st { padding: 4px 12px; font-size: 12px; color: #6a6178; background: #f7f0e6; min-height: 18px; }
+    footer { display: flex; gap: 6px; padding: 8px; background: #f7f0e6; }
+    input { flex: 1; border: 1px solid #c9a46a; border-radius: 8px; padding: 8px; font-size: 14px; }
+    button { border: 0; border-radius: 8px; padding: 8px 10px; background: #3d8b7a; color: #fff; font-size: 13px; }
+    #ptt { background: #6b5a8e; }
+  </style>
+</head>
+<body>
+  <header>栖云居 · 畅聊小窗</header>
+  <div id="log"></div>
+  <div id="st"></div>
+  <footer>
+    <button id="ptt" type="button">按住说</button>
+    <input id="inp" placeholder="说点什么…">
+    <button id="send" type="button">发送</button>
+  </footer>
+  <script>
+    function qiyunjuUpdate(p) {
+      if (!p) return;
+      if (p.status != null) document.getElementById("st").textContent = p.status;
+      if (p.line) {
+        var d = document.createElement("div");
+        d.className = "b " + (p.role === "user" ? "user" : "");
+        d.innerHTML = "<div class='who'></div><div class='tx'></div>";
+        d.querySelector(".who").textContent = p.who || (p.role === "user" ? "你" : "她");
+        d.querySelector(".tx").textContent = p.line;
+        var log = document.getElementById("log");
+        log.appendChild(d);
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+    window.qiyunjuUpdate = qiyunjuUpdate;
+  </script>
+</body>
+</html>

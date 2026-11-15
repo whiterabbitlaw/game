@@ -16,6 +16,7 @@ func _initialize() -> void:
 	_test_memory_p2()
 	_test_events_p2()
 	_test_registry()
+	_test_voice_p3()
 	if failed == 0:
 		print("chat_test: ALL OK")
 	else:
@@ -367,3 +368,71 @@ func _test_registry() -> void:
 	_ok(ChatConfig.new().worker_path("/v1/memory/extract").ends_with("/v1/memory/extract"), "extract url")
 	_ok(ChatConfig.new().worker_path("/v1/vision").find("/v1/vision") >= 0, "vision url")
 	_ok(ChatConfig.new().worker_path("/v1/stt").find("/v1/stt") >= 0, "stt url")
+
+
+
+func _test_voice_p3() -> void:
+	print("== voice p3 ==")
+	var parts: PackedStringArray = ChatTextUtil.split_sentences("你好。我是小云！今天好吗？还请多指教")
+	_ok(parts.size() == 4, "split four sentences (%d)" % parts.size())
+	_ok(parts[0].ends_with("。") and parts[1].ends_with("！") and parts[2].ends_with("？"), "punctuation kept")
+	var merged: PackedStringArray = ChatTextUtil.split_sentences("好。\n然后我们去灵田。")
+	_ok(merged.size() >= 2, "newline splits")
+	var times: PackedFloat32Array = ChatTextUtil.frame_times(10.0, 4)
+	_ok(times.size() == 4, "four frame times")
+	_ok(is_equal_approx(times[0], 1.2) and is_equal_approx(times[3], 8.8), "12%%-88%% span")
+	var shortt: PackedFloat32Array = ChatTextUtil.frame_times(0.1, 4)
+	_ok(shortt.size() == 1, "short video one frame")
+	var vad := ChatVAD.new()
+	vad.sample_rate = 16000
+	vad.threshold = 0.025
+	vad.min_speech_ms = 280
+	vad.silence_ms = 900
+	var quiet := PackedFloat32Array()
+	quiet.resize(1600)
+	var ev := vad.feed(quiet, false)
+	_ok(ev == "", "silence stays idle")
+	var loud := PackedFloat32Array()
+	loud.resize(1600)  # 100 ms
+	for i in loud.size():
+		loud[i] = 0.2
+	var started := false
+	for i in 4:
+		if vad.feed(loud, false) == "start":
+			started = true
+			break
+	_ok(started, "energy start after min speech")
+	var ended := false
+	for j in 10:
+		if vad.feed(quiet, false) == "end":
+			ended = true
+			break
+	_ok(ended, "silence timeout ends utterance")
+	vad.reset()
+	var barged := false
+	for b in 3:
+		if vad.feed(loud, true) == "barge":
+			barged = true
+			break
+	_ok(barged, "barge-in while tts")
+	var pcm := ChatVAD.floats_to_pcm16(loud)
+	var wav := ChatVAD.write_wav(pcm, 16000)
+	_ok(wav.size() == 44 + pcm.size(), "wav size")
+	_ok(wav.slice(0, 4).get_string_from_ascii() == "RIFF", "RIFF header")
+	_ok(wav.slice(8, 12).get_string_from_ascii() == "WAVE", "WAVE header")
+	_ok(wav.decode_u16(22) == 1 and wav.decode_u32(24) == 16000 and wav.decode_u16(34) == 16, "mono 16k 16-bit")
+	_ok(FileAccess.file_exists("res://web/manifest.webmanifest"), "pwa manifest")
+	_ok(FileAccess.file_exists("res://web/sw.js"), "service worker")
+	_ok(FileAccess.file_exists("res://web/qiyunju_media.js"), "media js")
+	_ok(FileAccess.file_exists("res://web/pip.html"), "pip html")
+	_ok(FileAccess.file_exists("res://android/README.md"), "android readme")
+	_ok(FileAccess.file_exists("res://android/plugins/QiyunjuOverlay/src/org/qiyunju/overlay/QiyunjuOverlayPlugin.java"), "overlay plugin source")
+	var manifest := FileAccess.get_file_as_string("res://web/manifest.webmanifest")
+	_ok(manifest.find('"start_url": "./"') >= 0 or manifest.find('"start_url":"./"') >= 0, "relative start_url")
+	var worker := FileAccess.get_file_as_string("res://tools/chat-worker/src/index.js")
+	_ok(worker.find("language") >= 0 and worker.find("handleStt") >= 0, "worker stt language")
+	var client_src := FileAccess.get_file_as_string("res://scripts/chat/chat_client.gd")
+	_ok(client_src.find('language: String = "zh"') >= 0 and client_src.find("tts_push") >= 0, "client stt zh + tts queue")
+	var packed := ChatPromptAssembler.new().assemble("chatgpt", [{"role": "user", "content": "看"}], "看这段视频", null, "", 3500, [{"kind": "video", "description": "第1帧：一只白猫"}])
+	var sys := str(packed["messages"][0].get("content", ""))
+	_ok(sys.find("白猫") >= 0 and sys.find("尚未逐帧") < 0, "video frames injected, stub text gone")

@@ -1,0 +1,21 @@
+plugins {
+    id "com.android.library"
+}
+
+android {
+    namespace "org.qiyunju.overlay"
+    compileSdk 34
+    defaultConfig {
+        minSdk 24
+        targetSdk 34
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // 把 Godot 4.7.2 的 godot-lib 放到 libs/，或改成 maven 坐标后再编译。
+    compileOnly fileTree(dir: "libs", include: ["godot-lib*.aar", "godot-lib*.jar"])
+}

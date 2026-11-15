@@ -1,6 +1,6 @@
 class_name ChatAttach
 extends Node
-## 网页用 JS 文件选择器，桌面用系统文件对话框。视频抽帧尚未接入，只留占位。
+## 网页用 JS 文件选择器，桌面用系统文件对话框。视频抽帧走网页 canvas（见 ChatVoiceSession.frames_ready）。
 
 signal file_picked(kind: String, bytes: PackedByteArray, mime: String, name: String)
 signal cancelled
@@ -26,9 +26,15 @@ func pick_audio() -> void:
 	_pick("audio", "audio/*", PackedStringArray(["*.wav,*.mp3,*.ogg,*.webm,*.m4a;Audio"]))
 
 
-func pick_video_stub() -> void:
-	# 占位：以后在客户端抽帧再送 /v1/vision。现在只提示。
+func pick_video() -> void:
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("if(window.qiyunjuMedia&&window.qiyunjuMedia.pickVideo){window.qiyunjuMedia.pickVideo();}", true)
+		return
 	cancelled.emit()
+
+
+func pick_video_stub() -> void:
+	pick_video()
 
 
 func _pick(kind: String, accept: String, filters: PackedStringArray) -> void:
