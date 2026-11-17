@@ -8,6 +8,7 @@ func _initialize() -> void:
 	var V = root.get_node("Voice")
 	var reached := {}
 	var miss: Array = []
+	var silent_ok: Array = []
 	var chars: Array = []
 	for c in Data.CHARS:
 		chars.append(c["id"])
@@ -15,6 +16,8 @@ func _initialize() -> void:
 		var id: String = V.id_for(who, text)
 		if id != "" and V.has_voice(id):
 			reached[id] = true
+		elif V.is_intentional_silence(who, text):
+			silent_ok.append("%s %s %s" % [tag, who, text.substr(0, 20)])
 		else:
 			miss.append("%s %s %s" % [tag, who, text.substr(0, 20)])
 	# pools（互动）
@@ -59,6 +62,7 @@ func _initialize() -> void:
 		if not reached.has(id):
 			unreached.append(id)
 	print("VOICE map ids=", ids.size(), " reached=", reached.size(), " story_lines=", story_total[0])
+	print("VOICE intentional silence: ", silent_ok.size(), " ", silent_ok)
 	print("VOICE game lines without voice: ", miss.size(), " ", miss)
 	print("VOICE ids unreachable from game data: ", unreached.size(), " ", unreached)
 	# 播放烟测

@@ -90,6 +90,32 @@ func apply_settings() -> void:
 func id_for(who: String, text: String) -> String:
 	return String(map.get(who + "|" + text.strip_edges(), ""))
 
+## 台词原文是否只有省略号 /「……！」（没有可念的字）。
+func is_ellipsis_only(text: String) -> bool:
+	var t := text.strip_edges()
+	if t.is_empty():
+		return false
+	var has_ellipsis := false
+	for i in t.length():
+		var ch := t.substr(i, 1)
+		if ch == "…" or ch == ".":
+			if ch == "…":
+				has_ellipsis = true
+			continue
+		if ch == "！" or ch == "!" or ch == "？" or ch == "?" or ch == " " or ch == "　":
+			continue
+		return false
+	return has_ellipsis
+
+## 纯省略号台词在对应 OGG 导入前视为有意静音（Voice.say 本来就会跳过缺文件）。
+func is_intentional_silence(who: String, text: String) -> bool:
+	if not is_ellipsis_only(text):
+		return false
+	var id := id_for(who, text)
+	if id != "" and has_voice(id):
+		return false
+	return true
+
 func has_voice(id: String) -> bool:
 	if id == "":
 		return false
