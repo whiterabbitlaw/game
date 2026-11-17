@@ -439,7 +439,7 @@ func _test_voice_p3() -> void:
 	_ok(ChatTextUtil.to_simplified("小雲今日靈田可曾澆過？") == "小云今日灵田可曾浇过？", "traditional to simplified")
 	_ok(ChatTextUtil.to_simplified("你好") == "你好", "already simplified stays")
 	var sw := FileAccess.get_file_as_string("res://web/sw.js")
-	_ok(sw.find("qiyunju-shell-v4") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v4 network-first")
+	_ok(sw.find("qiyunju-shell-v5") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v5 network-first")
 	var media := FileAccess.get_file_as_string("res://web/qiyunju_media.js")
 	_ok(media.find("warmAudio") >= 0 and media.find("pttDown") >= 0 and media.find("startMic") >= 0, "mic warm + ptt starts mic")
 	_ok(media.find("0x8000") >= 0 or media.find("fromCharCode.apply") >= 0, "wav encode is chunked")

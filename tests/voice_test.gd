@@ -13,10 +13,11 @@ func _initialize() -> void:
 	for c in Data.CHARS:
 		chars.append(c["id"])
 	var look := func(who: String, text: String, tag: String) -> void:
-		var id: String = V.id_for(who, text)
+		var ctx := tag if tag.begins_with("story:") else ""
+		var id: String = V.id_for(who, text, ctx)
 		if id != "" and V.has_voice(id):
 			reached[id] = true
-		elif V.is_intentional_silence(who, text):
+		elif V.is_intentional_silence(who, text, ctx):
 			silent_ok.append("%s %s %s" % [tag, who, text.substr(0, 20)])
 		else:
 			miss.append("%s %s %s" % [tag, who, text.substr(0, 20)])

@@ -86,9 +86,14 @@ func apply_settings() -> void:
 	AudioServer.set_bus_mute(i, muted() or volume() <= 0.001)
 	AudioServer.set_bus_volume_db(i, linear_to_db(maxf(volume(), 0.001)))
 
-## 查台词 ID；找不到返回 ""
-func id_for(who: String, text: String) -> String:
-	return String(map.get(who + "|" + text.strip_edges(), ""))
+## 查台词 ID；找不到返回 ""。ctx 形如 "story:kimi_s1"，用来区分同一原文的不同句子。
+func id_for(who: String, text: String, ctx: String = "") -> String:
+	var t := text.strip_edges()
+	if ctx != "":
+		var specific = map.get(ctx + "|" + who + "|" + t, "")
+		if String(specific) != "":
+			return String(specific)
+	return String(map.get(who + "|" + t, ""))
 
 ## 台词原文是否只有省略号 /「……！」（没有可念的字）。
 func is_ellipsis_only(text: String) -> bool:
@@ -107,11 +112,11 @@ func is_ellipsis_only(text: String) -> bool:
 		return false
 	return has_ellipsis
 
-## 纯省略号台词在对应 OGG 导入前视为有意静音（Voice.say 本来就会跳过缺文件）。
-func is_intentional_silence(who: String, text: String) -> bool:
+## 纯省略号台词在还没有对应 OGG 时视为有意静音；已导入音频的会正常播放。
+func is_intentional_silence(who: String, text: String, ctx: String = "") -> bool:
 	if not is_ellipsis_only(text):
 		return false
-	var id := id_for(who, text)
+	var id := id_for(who, text, ctx)
 	if id != "" and has_voice(id):
 		return false
 	return true
@@ -128,8 +133,8 @@ func _path(id: String) -> String:
 	return "res://audio/voice/%s/%s.ogg" % [who, id]
 
 ## 按角色 + 游戏原文播放（会打断上一句）
-func say(who: String, text: String) -> bool:
-	return play_id(id_for(who, text))
+func say(who: String, text: String, ctx: String = "") -> bool:
+	return play_id(id_for(who, text, ctx))
 
 func play_id(id: String) -> bool:
 	if id == "" or muted() or volume() <= 0.001:

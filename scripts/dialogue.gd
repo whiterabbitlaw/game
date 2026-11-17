@@ -212,7 +212,7 @@ func _say(line: String) -> void:
 	if who == "n" or who == "p":
 		Voice.stop()
 	elif not _skip:
-		Voice.say(who, txt)
+		Voice.say(who, txt, "story:" + str(scene.get("id", "")))
 	if who == "n":
 		name_chip.visible = false
 		text_lbl.add_theme_color_override("font_color", Color("#5b5778"))
