@@ -359,6 +359,7 @@ function extractText(result) {
 function stripThink(text) {
   return String(text || "")
     .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<think>[\s\S]*$/gi, "")
     .trim();
 }
 

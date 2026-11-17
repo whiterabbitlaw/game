@@ -29,11 +29,9 @@ func load_all() -> void:
 	elif typeof(persona.get("custom_dates", [])) == TYPE_ARRAY:
 		custom = persona["custom_dates"]
 	festivals = _load_json(FESTIVAL_PATH)
-	claims = _load_json(claims_path)
-	if typeof(claims.get("claims", {})) == TYPE_DICTIONARY:
-		claims = claims["claims"]
-	else:
-		claims = {}
+	var loaded := _load_json(claims_path)
+	var wrapped: Variant = loaded.get("claims", null)
+	claims = wrapped if typeof(wrapped) == TYPE_DICTIONARY else {}
 
 
 func due_today(now: Dictionary = {}, first_meet_unix: int = 0, ctx: Dictionary = {}) -> Array:

@@ -8,6 +8,13 @@ var memory: ChatMemory
 var profile := ChatProfile.new()
 var _list: VBoxContainer
 var _add: LineEdit
+var _panel: PanelContainer
+var pull_text: Callable
+var push_text: Callable
+
+
+func composer() -> LineEdit:
+	return _add
 
 
 func setup(mem: ChatMemory) -> void:
@@ -19,34 +26,45 @@ func setup(mem: ChatMemory) -> void:
 	dim.color = Color(0.08, 0.07, 0.14, 0.55)
 	add_child(dim)
 	var panel := PanelContainer.new()
-	panel.position = Vector2(30, 120)
-	panel.size = Vector2(660, 1040)
+	_panel = panel
+	panel.clip_contents = true
 	panel.add_theme_stylebox_override("panel", UI.panel(Color(1, 0.985, 0.95, 0.98), UI.GOLD, 28, 3))
 	add_child(panel)
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 10)
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_child(root)
 	var head := HBoxContainer.new()
 	root.add_child(head)
-	head.add_child(UI.brush_lbl("记忆", 44, UI.INK, HORIZONTAL_ALIGNMENT_LEFT))
-	var closeb := UI.btn("关闭", "dark", 24, Vector2(110, 52))
+	var title := UI.brush_lbl("记忆", 36, UI.INK, HORIZONTAL_ALIGNMENT_LEFT)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.clip_text = true
+	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title.custom_minimum_size = Vector2(0, 0)
+	head.add_child(title)
+	var closeb := UI.btn("关闭", "dark", 22, Vector2(96, 48))
 	closeb.pressed.connect(func():
 		closed.emit()
 		queue_free())
 	head.add_child(closeb)
 	var hint := UI.lbl("这些只存在这台设备上。共享档案对每位伙伴可见；下面是与眼前这位有关的记忆。摘要不可逐条删除，但清掉事实不影响对话记录。", 18, UI.INK_SOFT)
 	hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-	hint.custom_minimum_size = Vector2(620, 0)
+	hint.custom_minimum_size = Vector2(0, 0)
+	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(hint)
 	if memory and memory.summary().strip_edges() != "":
 		root.add_child(UI.lbl("滚动摘要", 24, UI.INK, true))
 		var sl := UI.lbl(memory.summary(), 20, UI.INK_SOFT)
 		sl.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-		sl.custom_minimum_size = Vector2(620, 0)
+		sl.custom_minimum_size = Vector2(0, 0)
+		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		root.add_child(sl)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.custom_minimum_size = Vector2(620, 560)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0, 120)
 	root.add_child(scroll)
 	_list = VBoxContainer.new()
 	_list.add_theme_constant_override("separation", 8)
@@ -65,6 +83,9 @@ func setup(mem: ChatMemory) -> void:
 	addb.pressed.connect(_on_add)
 	row.add_child(addb)
 	_rebuild()
+	_fit()
+	if is_inside_tree() and not get_viewport().size_changed.is_connected(_fit):
+		get_viewport().size_changed.connect(_fit)
 
 
 func _rebuild() -> void:
@@ -89,7 +110,7 @@ func _section(title: String, facts: Array, shared: bool) -> void:
 		var body := UI.lbl("[%s] %s" % [label, str(f.get("text", ""))], 22, UI.INK)
 		body.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		body.custom_minimum_size = Vector2(420, 0)
+		body.custom_minimum_size = Vector2(0, 0)
 		row.add_child(body)
 		var del := UI.btn("删除", "ghost", 20, Vector2(90, 44))
 		var fact_id := str(f.get("id", ""))
@@ -105,9 +126,32 @@ func _section(title: String, facts: Array, shared: bool) -> void:
 
 
 func _on_add() -> void:
+	if _add == null or memory == null:
+		return
+	if pull_text.is_valid():
+		_add.text = str(pull_text.call())
 	var t := _add.text.strip_edges()
-	if t == "" or memory == null:
+	if t == "":
 		return
 	_add.text = ""
+	if push_text.is_valid():
+		push_text.call("")
 	memory.add_fact(t, "other", [])
 	_rebuild()
+
+
+func _fit() -> void:
+	if _panel == null or not is_inside_tree():
+		return
+	var vp := get_viewport_rect().size
+	if vp.x < 8.0:
+		return
+	var r := ChatLayout.fit_rect(vp, 16.0, 0.0)
+	_panel.anchor_left = 0.0
+	_panel.anchor_top = 0.0
+	_panel.anchor_right = 0.0
+	_panel.anchor_bottom = 0.0
+	_panel.offset_left = r.position.x
+	_panel.offset_top = r.position.y
+	_panel.offset_right = r.end.x
+	_panel.offset_bottom = r.end.y

@@ -17,6 +17,9 @@ func _initialize() -> void:
 	_test_events_p2()
 	_test_registry()
 	_test_voice_p3()
+	_test_layout_math()
+	_test_vision_and_length()
+	await _test_chat_panel_layout()
 	if failed == 0:
 		print("chat_test: ALL OK")
 	else:
@@ -439,10 +442,171 @@ func _test_voice_p3() -> void:
 	_ok(ChatTextUtil.to_simplified("小雲今日靈田可曾澆過？") == "小云今日灵田可曾浇过？", "traditional to simplified")
 	_ok(ChatTextUtil.to_simplified("你好") == "你好", "already simplified stays")
 	var sw := FileAccess.get_file_as_string("res://web/sw.js")
-	_ok(sw.find("qiyunju-shell-v5") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v5 network-first")
+	_ok(sw.find("qiyunju-shell-v6") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("qiyunju_files.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v6 network-first")
+	var ime := FileAccess.get_file_as_string("res://web/qiyunju_ime.js")
+	_ok(ime.find("shouldSendOnEnter") >= 0 and ime.find("compositionend") >= 0 and ime.find("keyboardOverlapViewport") >= 0, "ime overlay policy")
 	var media := FileAccess.get_file_as_string("res://web/qiyunju_media.js")
 	_ok(media.find("warmAudio") >= 0 and media.find("pttDown") >= 0 and media.find("startMic") >= 0, "mic warm + ptt starts mic")
 	_ok(media.find("0x8000") >= 0 or media.find("fromCharCode.apply") >= 0, "wav encode is chunked")
 	var packed := ChatPromptAssembler.new().assemble("chatgpt", [{"role": "user", "content": "看"}], "看这段视频", null, "", 3500, [{"kind": "video", "description": "第1帧：一只白猫"}])
 	var sys := str(packed["messages"][0].get("content", ""))
 	_ok(sys.find("白猫") >= 0 and sys.find("尚未逐帧") < 0, "video frames injected, stub text gone")
+
+
+func _test_layout_math() -> void:
+	print("== chat layout ==")
+	var vp := Vector2(720, 1280)
+	var full := ChatLayout.fit_rect(vp, 12, 0)
+	_ok(full.position.x >= 0.0 and full.end.x <= vp.x and full.size.x >= 640.0, "portrait panel uses width inside 720 (%s)" % full)
+	_ok(full.end.y <= vp.y, "portrait panel inside height")
+	var kb := ChatLayout.fit_rect(vp, 12, 420)
+	_ok(kb.end.x <= vp.x and kb.end.y <= vp.y - 420.0 + 0.1, "keyboard inset keeps panel above keys (%s)" % kb)
+	var bub := ChatLayout.bubble_rect(vp, 0)
+	_ok(bub.end.x <= vp.x and bub.end.y <= vp.y and bub.size.x <= 520.0, "bubble stays inside (%s)" % bub)
+	var clamped := ChatLayout.clamp_pos(Vector2(900, 1400), bub.size, vp)
+	_ok(clamped.x + bub.size.x <= vp.x + 0.1 and clamped.y + bub.size.y <= vp.y + 0.1, "drag clamp")
+	_ok(ChatLayout.keyboard_overlap(vp, Vector2(360, 800), 0, 0, 800) == 0.0, "360 closed keyboard")
+	_ok(absf(ChatLayout.keyboard_overlap(vp, Vector2(360, 800), 0, 0, 400) - 640.0) < 0.05, "360 open keyboard")
+	_ok(ChatLayout.keyboard_overlap(vp, Vector2(390, 844), 0, 0, 844) == 0.0, "390 closed keyboard")
+	_ok(ChatLayout.keyboard_overlap(vp, Vector2(430, 932), 0, 0, 932) == 0.0, "430 closed keyboard")
+	_ok(ChatLayout.keyboard_overlap(vp, Vector2(390, 420), 0, 0, 420) == 0.0, "resized canvas does not double-inset")
+	var land := ChatLayout.keyboard_overlap(vp, Vector2(844, 390), 0, 0, 180)
+	var land_expect := (390.0 - 180.0) / (390.0 / 1280.0)
+	_ok(absf(land - land_expect) < 0.05, "landscape keyboard overlap")
+
+
+func _test_vision_and_length() -> void:
+	print("== vision and length ==")
+	var asm := ChatPromptAssembler.new()
+	var story := asm.assemble("claude", [], "can you tell a story")
+	var blob := JSON.stringify(story.get("messages", []))
+	_ok(blob.find("两到六句") < 0, "story prompt has no hard sentence cap")
+	_ok(blob.find("短回复") < 0, "story prompt does not demand a short reply")
+	_ok(blob.find("八到十二句") >= 0, "story prompt asks for a fuller story")
+	_ok(blob.find("没收到画面") >= 0, "image question without a picture must not be faked")
+	var seen := "画面左边是红色方块，右边是蓝色方块，顶上有一条绿色。"
+	var stored := ChatVision.compose_stored("can you understand the image?", [{"kind": "image", "description": seen}])
+	_ok(stored.find("can you understand the image?") >= 0 and stored.find("真正看到的图片") >= 0 and stored.find("红色") >= 0, "stored turn keeps question and vision")
+	var follow := asm.assemble("claude", [
+		{"role": "user", "content": stored},
+		{"role": "assistant", "content": "左边真的是红的。"},
+	], "tell some more you know")
+	var follow_blob := JSON.stringify(follow.get("messages", []))
+	_ok(follow_blob.find("红色方块") >= 0 and follow_blob.find("蓝色方块") >= 0, "vision text survives the next turn")
+	_ok(ChatVision.explain_vision_error("image too large").find("没有画面") >= 0, "oversize vision is a failure")
+	_ok(ChatVision.picker_error("file too large").find("18MB") >= 0, "picker explains the size limit")
+	var img := Image.create(1600, 900, false, Image.FORMAT_RGB8)
+	img.fill(Color(0.8, 0.1, 0.1))
+	var raw := img.save_jpg_to_buffer(0.9)
+	var prepared := ChatVision.prepare_image(raw, "image/jpeg")
+	_ok(bool(prepared.get("ok", false)), "large jpeg prepares")
+	var back := Image.new()
+	var bytes: PackedByteArray = Marshalls.base64_to_raw(str(prepared.get("b64", "")))
+	_ok(back.load_jpg_from_buffer(bytes) == OK, "prepared jpeg decodes")
+	_ok(back.get_width() <= 1024 and back.get_height() <= 1024, "prepared image is within 1024 (%dx%d)" % [back.get_width(), back.get_height()])
+	_ok(int(prepared.get("bytes", 0)) < 400000, "prepared payload stays small (%s)" % prepared.get("bytes", 0))
+
+
+func _test_chat_panel_layout() -> void:
+	print("== chat panel controls ==")
+	var host := Control.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_child(host)
+	# 运行 --script 时过早引用 class_name 会在 Autoload 注册前编译 chat_panel.gd。
+	var panel = load("res://scripts/chat/chat_panel.gd").new()
+	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.add_child(panel)
+	panel.open_chat("claude")
+	for _i in 6:
+		await process_frame
+	var vp_rect: Rect2 = panel.get_viewport_rect()
+	_ok(vp_rect.size.x >= 700.0 and vp_rect.size.y >= 1200.0, "logical viewport is project size %s" % vp_rect.size)
+	_assert_panel_fits(panel, vp_rect, "portrait")
+	var bodies := _message_labels(panel)
+	_ok(bodies.size() >= 1, "opening chat shows a message")
+	if not bodies.is_empty():
+		var body: Label = bodies[0]
+		_ok(body.autowrap_mode == TextServer.AUTOWRAP_ARBITRARY, "messages wrap")
+		_ok(body.custom_minimum_size.x <= 1.0, "message min width does not force overflow")
+		_ok(body.get_line_count() >= 2, "long greeting wraps to more than one line (%d)" % body.get_line_count())
+		_ok(ChatLayout.inside(vp_rect, body.get_global_rect(), 2.0), "greeting stays inside viewport %s" % body.get_global_rect())
+	panel._bubble("user", "你好，world! 混合：标点。（ok）")
+	for _j in 3:
+		await process_frame
+	var mixed := _message_labels(panel)
+	if mixed.size() >= 2:
+		var line: Label = mixed[mixed.size() - 1]
+		_ok(ChatLayout.inside(vp_rect, line.get_global_rect(), 2.0), "mixed punctuation bubble inside %s" % line.get_global_rect())
+	panel._keyboard_inset = 420.0
+	panel._fit_panel()
+	for _k in 3:
+		await process_frame
+	_assert_panel_fits(panel, vp_rect, "keyboard")
+	if panel._panel:
+		_ok(panel._panel.get_global_rect().end.y <= vp_rect.size.y - 420.0 + 2.0, "panel bottom above keyboard")
+	if panel.input:
+		_ok(ChatLayout.inside(vp_rect, panel.input.get_global_rect(), 2.0), "composer inside viewport with keyboard")
+	panel._keyboard_inset = 0.0
+	panel._web_bubble = true
+	panel._panel.position = Vector2.ZERO
+	panel._fit_panel()
+	for _n in 3:
+		await process_frame
+	_assert_panel_fits(panel, vp_rect, "bubble")
+	if panel._panel:
+		_ok(panel._panel.size.x <= 520.0 + 1.0, "bubble width capped")
+	var mem = load("res://scripts/chat/memory_view.gd").new()
+	host.add_child(mem)
+	mem.setup(panel.memory)
+	for _m in 3:
+		await process_frame
+	if mem._panel:
+		_ok(ChatLayout.inside(vp_rect, mem._panel.get_global_rect(), 2.0), "memory view inside viewport")
+		_ok(mem._panel.get_combined_minimum_size().x <= vp_rect.size.x + 1.0, "memory min width fits")
+	mem.queue_free()
+	panel.queue_free()
+	host.queue_free()
+
+
+func _assert_panel_fits(panel, vp_rect: Rect2, tag: String) -> void:
+	if panel._panel == null:
+		_ok(false, tag + " panel exists")
+		return
+	var prect: Rect2 = panel._panel.get_global_rect()
+	_ok(ChatLayout.inside(vp_rect, prect, 1.5), "%s panel inside viewport %s" % [tag, prect])
+	_ok(panel._panel.get_combined_minimum_size().x <= vp_rect.size.x + 1.0, "%s panel min width %s <= viewport" % [tag, panel._panel.get_combined_minimum_size()])
+	var buttons: Array = []
+	_collect_buttons(panel._panel, buttons)
+	_ok(buttons.size() >= 8, "%s has header and composer buttons (%d)" % [tag, buttons.size()])
+	for b in buttons:
+		var btn := b as BaseButton
+		if not btn.visible:
+			continue
+		var br := btn.get_global_rect()
+		if not ChatLayout.inside(prect, br, 2.0):
+			_ok(false, "%s button '%s' outside panel %s" % [tag, btn.text, br])
+		else:
+			_ok(true, "%s button '%s' inside" % [tag, btn.text])
+	if panel.scroll:
+		_ok(panel.scroll.get_h_scroll_bar().max_value <= panel.scroll.size.x + 2.0, "%s no horizontal message scroll" % tag)
+
+
+func _collect_buttons(n: Node, out: Array) -> void:
+	if n is BaseButton:
+		out.append(n)
+	for c in n.get_children():
+		_collect_buttons(c, out)
+
+
+func _message_labels(panel) -> Array:
+	var out: Array = []
+	if panel.log_box == null:
+		return out
+	for wrap in panel.log_box.get_children():
+		for vb in wrap.get_children():
+			for child in vb.get_children():
+				if child is Label and (child as Label).autowrap_mode != TextServer.AUTOWRAP_OFF:
+					var text := (child as Label).text
+					if text != "你" and text != "暖阳学者":
+						out.append(child)
+	return out

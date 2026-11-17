@@ -6,6 +6,7 @@ extends RefCounted
 const PERSONA_PATH := "res://data/chat/persona.json"
 const CARD_DIR := "res://data/chat/cards/"
 const DEFAULT_BUDGET := 3500
+const GROUNDING := "【篇幅与事实】闲聊用一两句到四五句，接住玩家刚说的话。玩家要求讲故事、细说、多讲一点或解释清楚时，写完整：故事大约八到十二句，要有开端、经过和收束，不要用两三句敷衍。不要每轮都拿角色的小道具（向日葵、笔记、茶、星星、灵田）来填空，除非玩家刚提到，或它和这一问有关。只使用对话、人设和设定里真正有的事，不要编造玩家没说过的经历、约定或情绪。没有「你此刻真正看到的画面」时，不要假装看见了图片；若玩家在问图，就说明这轮没收到画面，请再发一次。"
 
 var persona: Dictionary = {}
 var last_meta: Dictionary = {}
@@ -61,13 +62,14 @@ func assemble(char_id: String, history: Array, user_text: String, memory: ChatMe
 		"attachments": attachments,
 	}
 	var sections := registry.collect(ctx)
-	var system_text := registry.system_text(sections, char_name, user_name())
-	var post := str(data.get("post_history_instructions", "")).strip_edges()
+	var system_text := _relax_length(registry.system_text(sections, char_name, user_name()))
+	var post := _relax_length(str(data.get("post_history_instructions", "")).strip_edges())
 	# 若模块也提供了 post_history，拼在角色卡指令之后
 	var post_mod := registry.post_history(sections, char_name, user_name())
 	if post_mod != "":
 		post = (post + "\n\n" + post_mod).strip_edges() if post != "" else post_mod
 	post = _macro(post, char_name)
+	post = (post + "\n\n" + GROUNDING).strip_edges()
 	var sys_tokens := ChatLorebook.estimate_tokens(system_text + "\n" + post + "\n" + user_text)
 	var remain := maxi(400, token_budget - sys_tokens)
 	var kept := _trim_history(history, remain)
@@ -131,6 +133,11 @@ func _trim_history(history: Array, token_budget: int) -> Array:
 
 func _macro(text: String, char_name: String) -> String:
 	return text.replace("{{char}}", char_name).replace("{{user}}", user_name())
+
+
+func _relax_length(text: String) -> String:
+	return text.replace("回复宜短，一般两到六句，不要一次写成长篇。", "平常用一两句到四五句回应眼前这句话。") \
+		.replace("用简体中文短回复。", "用简体中文。")
 
 
 func _load_json(path: String) -> Dictionary:

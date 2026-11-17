@@ -248,7 +248,7 @@ class _MultimodalModule extends ChatModule:
 		var att: Array = ctx.get("attachments", [])
 		if att.is_empty():
 			return []
-		var lines: PackedStringArray = ["【玩家本轮附上了媒体。下面是已经转写的内容，请当作你亲眼所见来回应，不要说自己看不到。】"]
+		var lines: PackedStringArray = ["【玩家本轮附上了媒体。下面是模型真正看到的描述，请只根据这些画面细节回答，不要说自己看不到，也不要改成向日葵、笔记等角色习惯话题。描述里没有的东西不要编。】"]
 		for a in att:
 			var kind := str(a.get("kind", "image"))
 			var desc := str(a.get("description", "")).strip_edges()

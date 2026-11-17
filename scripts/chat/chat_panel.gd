@@ -24,6 +24,10 @@ var attach: ChatAttach
 var _note := ""
 var _waiting := false
 var _attachments: Array = []
+var _vision_busy := false
+var _pending_image_name := ""
+var _img_btn: Button
+var _attach_lbl: Label
 var _mini := false
 var _web_bubble := false
 var _dragging := false
@@ -42,6 +46,13 @@ var _dim: ColorRect
 var _ptt_held := false
 var _drag_ready := false
 var _wait_gen := 0
+var _keyboard_inset := 0.0
+var _web_input: ChatWebInput
+var _ime_target: LineEdit
+var _ime_submit: Callable
+var _fitting := false
+var _ime_poll := 0.0
+var _last_ime_sig := ""
 
 
 func open_chat(id: String) -> void:
@@ -74,46 +85,60 @@ func _build() -> void:
 	add_child(dim)
 	var panel := PanelContainer.new()
 	_panel = panel
-	panel.position = Vector2(20, 80)
-	panel.size = Vector2(680, 1120)
+	panel.clip_contents = true
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	panel.add_theme_stylebox_override("panel", UI.panel(Color(1, 0.985, 0.95, 0.97), d.get("color", UI.GOLD), 28, 3))
 	add_child(panel)
 	var root := VBoxContainer.new()
-	root.add_theme_constant_override("separation", 10)
+	root.add_theme_constant_override("separation", 8)
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.add_child(root)
 	var head := HBoxContainer.new()
 	head.add_theme_constant_override("separation", 8)
 	root.add_child(head)
-	var back := UI.btn("返回", "dark", 24, Vector2(110, 52))
+	var back := _flex_btn("返回", "dark")
+	back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	back.custom_minimum_size = Vector2(88, 46)
 	back.pressed.connect(func():
 		if main:
 			main.close_free_chat())
 	head.add_child(back)
-	title_lbl = UI.brush_lbl("%s·畅聊" % str(d.get("title", "")), 44, d.get("color", UI.INK).darkened(0.2), HORIZONTAL_ALIGNMENT_LEFT)
+	title_lbl = UI.brush_lbl("%s·畅聊" % str(d.get("title", "")), 34, d.get("color", UI.INK).darkened(0.2), HORIZONTAL_ALIGNMENT_LEFT)
 	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_lbl.clip_text = true
+	title_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title_lbl.custom_minimum_size = Vector2(0, 0)
 	head.add_child(title_lbl)
-	tts_btn = UI.btn("语音开", "ghost", 22, Vector2(110, 52))
+	head.gui_input.connect(_on_head_gui)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 8)
+	root.add_child(actions)
+	tts_btn = _flex_btn("语音开", "ghost")
 	tts_btn.pressed.connect(_toggle_tts)
-	head.add_child(tts_btn)
-	var setb := UI.btn("接口", "ghost", 22, Vector2(90, 52))
+	actions.add_child(tts_btn)
+	var setb := _flex_btn("接口", "ghost")
 	setb.pressed.connect(func():
 		if main:
 			main.open_chat_settings())
-	head.add_child(setb)
-	var memb := UI.btn("记忆", "ghost", 22, Vector2(90, 52))
+	actions.add_child(setb)
+	var memb := _flex_btn("记忆", "ghost")
 	memb.pressed.connect(_open_memory)
-	head.add_child(memb)
-	var minib := UI.btn("小窗", "ghost", 22, Vector2(90, 52))
+	actions.add_child(memb)
+	var minib := _flex_btn("小窗", "ghost")
 	minib.pressed.connect(toggle_mini)
-	head.add_child(minib)
-	head.gui_input.connect(_on_head_gui)
+	actions.add_child(minib)
+	actions.gui_input.connect(_on_head_gui)
 	_hint = UI.lbl("每句话都会记在本机。可按住说话或开免提；她会逐句读出来，你开口就能打断。网页可发图、抽视频帧，也可安装到主屏。", 18, UI.INK_SOFT)
 	_hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-	_hint.custom_minimum_size = Vector2(620, 0)
+	_hint.custom_minimum_size = Vector2(0, 0)
+	_hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(_hint)
 	scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.custom_minimum_size = Vector2(620, 760)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(0, 72)
 	root.add_child(scroll)
 	log_box = VBoxContainer.new()
 	log_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -121,33 +146,42 @@ func _build() -> void:
 	scroll.add_child(log_box)
 	status_lbl = UI.lbl("", 20, UI.INK_SOFT)
 	status_lbl.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-	status_lbl.custom_minimum_size = Vector2(620, 0)
+	status_lbl.custom_minimum_size = Vector2(0, 0)
+	status_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(status_lbl)
+	_attach_lbl = UI.lbl("", 18, UI.INK)
+	_attach_lbl.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	_attach_lbl.custom_minimum_size = Vector2(0, 0)
+	_attach_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_attach_lbl.visible = false
+	root.add_child(_attach_lbl)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 	root.add_child(row)
 	input = LineEdit.new()
 	input.placeholder_text = "对她说点什么……"
 	input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	input.custom_minimum_size = Vector2(0, 56)
-	input.add_theme_font_size_override("font_size", 24)
+	input.custom_minimum_size = Vector2(0, 52)
+	input.add_theme_font_size_override("font_size", 22)
 	input.text_submitted.connect(func(_t): _send())
 	row.add_child(input)
-	send_btn = UI.btn("发送", "jade", 26, Vector2(130, 56))
+	send_btn = _flex_btn("发送", "jade")
+	send_btn.size_flags_horizontal = Control.SIZE_SHRINK_END
+	send_btn.custom_minimum_size = Vector2(88, 52)
 	send_btn.pressed.connect(_send)
 	row.add_child(send_btn)
 	var vrow := HBoxContainer.new()
 	vrow.add_theme_constant_override("separation", 8)
 	root.add_child(vrow)
-	ptt_btn = UI.btn("按住说", "ghost", 22, Vector2(150, 56))
+	ptt_btn = _flex_btn("按住说", "ghost")
 	ptt_btn.button_down.connect(_on_ptt_down)
 	ptt_btn.button_up.connect(_on_ptt_up)
 	vrow.add_child(ptt_btn)
-	hands_btn = UI.btn("免提", "ghost", 22, Vector2(110, 56))
+	hands_btn = _flex_btn("免提", "ghost")
 	hands_btn.pressed.connect(_toggle_handsfree)
 	vrow.add_child(hands_btn)
 	if OS.has_feature("web"):
-		var pipb := UI.btn("画中画", "ghost", 22, Vector2(110, 56))
+		var pipb := _flex_btn("画中画", "ghost")
 		pipb.pressed.connect(func():
 			if voice:
 				voice.open_pip())
@@ -155,13 +189,14 @@ func _build() -> void:
 	var mrow := HBoxContainer.new()
 	mrow.add_theme_constant_override("separation", 8)
 	root.add_child(mrow)
-	var imgb := UI.btn("图片", "ghost", 22, Vector2(90, 56))
+	var imgb := _flex_btn("图片", "ghost")
+	_img_btn = imgb
 	imgb.pressed.connect(func(): attach.pick_image())
 	mrow.add_child(imgb)
-	var sttb := UI.btn("听写", "ghost", 22, Vector2(90, 56))
+	var sttb := _flex_btn("听写", "ghost")
 	sttb.pressed.connect(func(): attach.pick_audio())
 	mrow.add_child(sttb)
-	var vidb := UI.btn("视频", "ghost", 22, Vector2(90, 56))
+	var vidb := _flex_btn("视频", "ghost")
 	vidb.pressed.connect(_pick_video)
 	mrow.add_child(vidb)
 	client = ChatClient.new()
@@ -175,7 +210,10 @@ func _build() -> void:
 	attach = ChatAttach.new()
 	add_child(attach)
 	attach.file_picked.connect(_on_file)
+	attach.pick_failed.connect(_on_pick_failed)
 	attach.cancelled.connect(func():
+		if _vision_busy:
+			return
 		if not OS.has_feature("web") and status_lbl and status_lbl.text.begins_with("正在"):
 			return
 		_set_status("没有选择文件。"))
@@ -196,6 +234,22 @@ func _build() -> void:
 	player.playback_type = AudioServer.PLAYBACK_TYPE_DEFAULT
 	player.finished.connect(_on_player_finished)
 	add_child(player)
+	if OS.has_feature("web"):
+		_web_input = ChatWebInput.new()
+		add_child(_web_input)
+		_web_input.setup()
+		if _web_input.available():
+			input.virtual_keyboard_enabled = false
+			input.focus_mode = Control.FOCUS_NONE
+			input.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_web_input.text_event.connect(_on_ime_text)
+			_web_input.submit_event.connect(_on_ime_submit)
+			_web_input.inset_event.connect(_on_ime_inset)
+			_bind_ime(input, _send)
+			set_process(true)
+	_fit_panel()
+	if not get_viewport().size_changed.is_connected(_fit_panel):
+		get_viewport().size_changed.connect(_fit_panel)
 
 
 func _hydrate() -> void:
@@ -215,13 +269,22 @@ func _hydrate() -> void:
 
 
 func _send() -> void:
-	var text := input.text.strip_edges()
-	if text == "" or _waiting:
+	_pull_ime_into(input)
+	var text := input.text.strip_edges() if input else ""
+	if _vision_busy:
+		_set_status("图片还在看。看完，或出现失败提示之后，再发送。")
 		return
-	input.text = ""
+	if _waiting:
+		return
+	if text == "" and _attachments.is_empty():
+		return
+	var stored := ChatVision.compose_stored(text, _attachments)
+	var prior: Array = memory.recent(30)
+	_set_composer("")
+	_show_attach("")
 	_interrupt_speech()
-	memory.append("user", text)
-	_bubble("user", text)
+	memory.append("user", stored)
+	_bubble("user", stored)
 	_waiting = true
 	if send_btn:
 		send_btn.disabled = true
@@ -229,7 +292,7 @@ func _send() -> void:
 		voice.set_state(ChatVoiceSession.STATE_THINKING)
 	_set_status("正在想…")
 	_arm_wait_timeout(30.0, "想太久了，请再试一次。")
-	var packed := assembler.assemble(char_id, memory.recent(30), text, memory, _note, ChatPromptAssembler.DEFAULT_BUDGET, _attachments)
+	var packed := assembler.assemble(char_id, prior, stored, memory, _note, ChatPromptAssembler.DEFAULT_BUDGET, _attachments)
 	_attachments = []
 	client.chat(packed["messages"])
 
@@ -262,8 +325,8 @@ func _arm_wait_timeout(sec: float, msg: String) -> void:
 
 func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
 	_clear_wait()
-	if not ok:
-		_set_status(text)
+	if not ok or text.strip_edges() == "":
+		_set_status(text if text.strip_edges() != "" else "她没有说出话。请再试一次。")
 		if voice:
 			if voice.mode == "handsfree":
 				voice.set_state(ChatVoiceSession.STATE_LISTENING, "免提")
@@ -496,9 +559,11 @@ func _bubble(role: String, text: String) -> void:
 	var vb := VBoxContainer.new()
 	wrap.add_child(vb)
 	vb.add_child(UI.lbl(who, 18, UI.INK_SOFT, true))
-	var body := UI.lbl(text, 24, color)
+	var body := UI.lbl(text, 22, color)
 	body.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
-	body.custom_minimum_size = Vector2(580 if not _web_bubble and not _mini else 400, 0)
+	body.custom_minimum_size = Vector2(0, 0)
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vb.add_child(body)
 	log_box.add_child(wrap)
 	_scroll_to_end()
@@ -580,17 +645,21 @@ func _on_vision(ok: bool, text: String, _raw: Dictionary) -> void:
 			_attachments.append({"kind": "video", "description": summary})
 			_set_status("她已经在看这段视频了。补一句要说的话，或直接发送。")
 			if input and input.text.strip_edges() == "":
-				input.text = "你看这段视频。"
+				_set_composer("你看这段视频。")
 		else:
 			_set_status("正在看视频（%d 帧完成）…" % _vision_parts.size())
 		return
+	_vision_busy = false
 	if not ok or text.strip_edges() == "":
-		_set_status(text if text != "" else "看图失败。")
+		_attachments = []
+		var fail := ChatVision.explain_vision_error(text)
+		_show_attach(fail)
+		_set_status(fail)
 		return
-	_attachments.append({"kind": "image", "description": text.strip_edges()})
-	_set_status("她已经在看这张图了。补一句要说的话，或直接发送。")
-	if input and input.text.strip_edges() == "":
-		input.text = "你看这张图。"
+	_attachments = [{"kind": "image", "description": text.strip_edges(), "name": _pending_image_name}]
+	var seen := "已看到：%s" % text.strip_edges()
+	_show_attach(seen)
+	_set_status("画面已记下。再问她时会按这些细节回答；描述不对就再发一次图。")
 
 
 func _on_stt(ok: bool, text: String, _raw: Dictionary) -> void:
@@ -605,31 +674,44 @@ func _on_stt(ok: bool, text: String, _raw: Dictionary) -> void:
 			elif voice:
 				voice.set_state(ChatVoiceSession.STATE_IDLE)
 			return
-		if input:
-			input.text = text.strip_edges()
+		_set_composer(text.strip_edges())
 		_send()
 		return
 	if not ok or text.strip_edges() == "":
 		_set_status(text if text != "" else "听写失败。也可按住说话，或先选一段音频文件。")
 		return
 	if input:
-		if input.text.strip_edges() != "":
-			input.text = input.text + text
-		else:
-			input.text = text
+		var merged := text if input.text.strip_edges() == "" else input.text + text
+		_set_composer(merged)
 	_set_status("听写完成，可以改一改再发送。")
 
 
-func _on_file(kind: String, bytes: PackedByteArray, mime: String, _name: String) -> void:
+func _on_pick_failed(message: String) -> void:
+	_vision_busy = false
+	_attachments = []
+	_show_attach(message)
+	_set_status(message)
+
+
+func _on_file(kind: String, bytes: PackedByteArray, mime: String, name: String) -> void:
 	if bytes.is_empty():
+		_on_pick_failed("没有读到文件。")
 		return
-	var b64 := Marshalls.raw_to_base64(bytes)
 	if kind == "audio":
 		_set_status("正在听写……")
-		client.stt(b64, "wav" if mime.find("wav") >= 0 else mime, "zh")
-	else:
-		_set_status("正在看图……")
-		client.vision(b64, "请用简体中文简要描述这张图片里有什么，不超过 120 字。", mime)
+		client.stt(Marshalls.raw_to_base64(bytes), "wav" if mime.find("wav") >= 0 else mime, "zh")
+		return
+	var prepared := ChatVision.prepare_image(bytes, mime)
+	if not bool(prepared.get("ok", false)):
+		_on_pick_failed(str(prepared.get("error", "这张图打不开。")))
+		return
+	_pending_image_name = name
+	_vision_busy = true
+	_attachments = []
+	var label := name if name != "" else "图片"
+	_show_attach("正在看图：%s。看完之前发送不会带上画面。" % label)
+	_set_status("正在看图：%s" % label)
+	client.vision(str(prepared.get("b64", "")), ChatVision.PROMPT, str(prepared.get("mime", "image/jpeg")))
 
 
 func _pick_video() -> void:
@@ -672,8 +754,7 @@ func _on_pip_event(event: String, payload: Dictionary) -> void:
 			var t := str(payload.get("text", "")).strip_edges()
 			if t == "":
 				return
-			if input:
-				input.text = t
+			_set_composer(t)
 			_send()
 		"ptt_down":
 			_on_ptt_down()
@@ -692,14 +773,19 @@ func _on_pip_event(event: String, payload: Dictionary) -> void:
 
 func _open_memory() -> void:
 	var view := ChatMemoryView.new()
+	view.pull_text = _pull_ime_value
+	view.push_text = _push_ime_text
+	view.closed.connect(_on_memory_closed)
 	add_child(view)
 	view.setup(memory)
+	if view.composer():
+		_bind_ime(view.composer(), view._on_add)
 
 
 func toggle_mini() -> void:
 	if OS.has_feature("web"):
 		_web_bubble = not _web_bubble
-		_apply_web_bubble()
+		_fit_panel()
 		return
 	_mini = not _mini
 	var win := get_window()
@@ -711,69 +797,207 @@ func toggle_mini() -> void:
 		win.borderless = true
 		win.always_on_top = true
 		win.size = Vector2i(420, 680)
-		_apply_compact_panel(true)
 	else:
 		win.borderless = _saved_borderless
 		win.always_on_top = _saved_on_top
 		if _saved_win_size != Vector2i.ZERO:
 			win.size = _saved_win_size
 			win.position = _saved_win_pos
-		_apply_compact_panel(false)
-
-
-func _apply_web_bubble() -> void:
-	_apply_compact_panel(_web_bubble)
+	_fit_panel()
 
 
 func _maybe_phone_compact() -> void:
-	var mobile := false
-	if OS.has_feature("mobile"):
-		mobile = true
-	elif OS.has_feature("web"):
-		var raw: Variant = JavaScriptBridge.eval("!!(/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) || (Math.min(window.innerWidth||9999, window.innerHeight||9999) < 560))", true)
-		mobile = str(raw) == "true" or raw == true or str(raw) == "1"
-	if mobile:
-		_web_bubble = true
-		_apply_compact_panel(true)
+	# 手机不再强制缩小成固定气泡。固定宽度小于标题栏最小宽度时，面板会被撑出视口右侧。
+	_fit_panel()
 
 
-func _apply_compact_panel(compact: bool) -> void:
-	if _panel == null:
-		for c in get_children():
-			if c is PanelContainer:
-				_panel = c
-				break
-	if _panel == null:
+func _layout_bubble() -> bool:
+	return _web_bubble or _mini
+
+
+func _fit_panel() -> void:
+	if _fitting or _panel == null or not is_inside_tree():
 		return
-	# 手机气泡不要用全屏遮罩吞掉点击；只让气泡自己接收触摸。
-	if compact:
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		if _dim:
-			_dim.visible = false
-			_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-		_panel.position = Vector2(20, 200)
-		_panel.size = Vector2(460, 820)
-		if scroll:
-			scroll.custom_minimum_size = Vector2(420, 420)
-		if _hint:
-			_hint.custom_minimum_size = Vector2(420, 0)
-		if status_lbl:
-			status_lbl.custom_minimum_size = Vector2(420, 0)
-	else:
-		mouse_filter = Control.MOUSE_FILTER_STOP
-		if _dim:
-			_dim.visible = true
-			_dim.mouse_filter = Control.MOUSE_FILTER_STOP
-		_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-		_panel.position = Vector2(20, 80)
-		_panel.size = Vector2(680, 1120)
-		if scroll:
-			scroll.custom_minimum_size = Vector2(620, 760)
-		if _hint:
-			_hint.custom_minimum_size = Vector2(620, 0)
-		if status_lbl:
-			status_lbl.custom_minimum_size = Vector2(620, 0)
+	_fitting = true
+	var vp := get_viewport_rect().size
+	if vp.x < 8.0 or vp.y < 8.0:
+		vp = Vector2(720, 1280)
+	var rect := ChatLayout.bubble_rect(vp, _keyboard_inset) if _layout_bubble() else ChatLayout.fit_rect(vp, 12.0, _keyboard_inset)
+	if _layout_bubble() and _panel.size.x > 1.0 and _panel.position != Vector2.ZERO:
+		rect.position = ChatLayout.clamp_pos(_panel.position, rect.size, vp)
+	_apply_panel_rect(rect)
+	var bubble := _layout_bubble()
+	mouse_filter = Control.MOUSE_FILTER_IGNORE if bubble else Control.MOUSE_FILTER_STOP
+	if _dim:
+		_dim.visible = not bubble
+		_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE if bubble else Control.MOUSE_FILTER_STOP
+	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	if _hint:
+		_hint.visible = not bubble and _keyboard_inset < 160.0
+	if scroll:
+		scroll.custom_minimum_size = Vector2(0, 0 if _keyboard_inset > 200.0 else 72)
+	_fitting = false
+	_last_ime_sig = ""
+	_sync_ime_rect()
+
+
+func _apply_panel_rect(r: Rect2) -> void:
+	_panel.anchor_left = 0.0
+	_panel.anchor_top = 0.0
+	_panel.anchor_right = 0.0
+	_panel.anchor_bottom = 0.0
+	_panel.offset_left = r.position.x
+	_panel.offset_top = r.position.y
+	_panel.offset_right = r.end.x
+	_panel.offset_bottom = r.end.y
+	_panel.clip_contents = true
+
+
+func _flex_btn(text: String, kind: String) -> Button:
+	var b := UI.btn(text, kind, 20, Vector2(0, 46))
+	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	b.clip_text = true
+	b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	for state_name in ["normal", "hover", "pressed", "focus", "disabled"]:
+		var sb := b.get_theme_stylebox(state_name)
+		if sb is StyleBoxFlat:
+			var flat := (sb as StyleBoxFlat).duplicate()
+			flat.content_margin_left = 6
+			flat.content_margin_right = 6
+			flat.content_margin_top = 4
+			flat.content_margin_bottom = 4
+			b.add_theme_stylebox_override(state_name, flat)
+	return b
+
+
+func _process(delta: float) -> void:
+	if _web_input == null or not _web_input.available():
+		return
+	_ime_poll += delta
+	if _ime_poll < 0.12:
+		return
+	_ime_poll = 0.0
+	var vp := get_viewport_rect().size
+	var inset := _web_input.poll_inset(vp)
+	if absf(inset - _keyboard_inset) > 1.5:
+		_keyboard_inset = inset
+		_fit_panel()
+	_sync_ime_rect(true)
+
+
+func _bind_ime(target: LineEdit, on_submit: Callable) -> void:
+	_ime_target = target
+	_ime_submit = on_submit
+	_last_ime_sig = ""
+	if _web_input == null or not _web_input.available() or target == null:
+		return
+	var label := target.placeholder_text if target.placeholder_text != "" else "输入"
+	_web_input.open_field(target.placeholder_text, label)
+	_web_input.set_text(target.text)
+	_sync_ime_rect()
+
+
+func _current_ime_target() -> LineEdit:
+	if _ime_target != null and is_instance_valid(_ime_target) and _ime_target.visible:
+		return _ime_target
+	return null
+
+
+func _sync_ime_rect(force: bool = false) -> void:
+	_sync_file_picker()
+	if _web_input == null or not _web_input.available():
+		return
+	var target := _current_ime_target()
+	if target == null:
+		_web_input.hide()
+		_last_ime_sig = ""
+		return
+	var r := target.get_global_rect()
+	var vp := get_viewport_rect().size
+	var sig := "%0.1f,%0.1f,%0.1f,%0.1f,%0.1f,%0.1f" % [r.position.x, r.position.y, r.size.x, r.size.y, vp.x, vp.y]
+	if not force and sig == _last_ime_sig:
+		return
+	_last_ime_sig = sig
+	if r.size.x < 2.0 or r.size.y < 2.0:
+		return
+	_web_input.place(r, vp)
+
+
+func _sync_file_picker() -> void:
+	if attach == null or _img_btn == null or not is_instance_valid(_img_btn) or not _img_btn.visible:
+		if attach:
+			attach.hide_picker()
+		return
+	var r := _img_btn.get_global_rect()
+	if r.size.x < 2.0 or r.size.y < 2.0:
+		attach.hide_picker()
+		return
+	attach.place_picker(r, get_viewport_rect().size)
+
+
+func _show_attach(message: String) -> void:
+	if _attach_lbl == null:
+		return
+	_attach_lbl.text = message
+	_attach_lbl.visible = message.strip_edges() != ""
+
+
+func _pull_ime_value() -> String:
+	if _web_input != null and _web_input.available():
+		return _web_input.value()
+	if _ime_target != null and is_instance_valid(_ime_target):
+		return _ime_target.text
+	return input.text if input else ""
+
+
+func _push_ime_text(t: String) -> void:
+	if _web_input != null and _web_input.available():
+		_web_input.set_text(t)
+
+
+func _pull_ime_into(target: LineEdit) -> void:
+	if target == null or _web_input == null or not _web_input.available():
+		return
+	if _ime_target != target:
+		return
+	target.text = _web_input.value()
+
+
+func _set_composer(t: String) -> void:
+	if input:
+		input.text = t
+	if _ime_target == input:
+		_push_ime_text(t)
+
+
+func _on_ime_text(text: String, kind: String, composing: bool) -> void:
+	var target := _current_ime_target()
+	if target == null:
+		return
+	if kind == "focus":
+		return
+	if composing and kind == "composition":
+		return
+	target.text = text
+
+
+func _on_ime_submit(text: String) -> void:
+	var target := _current_ime_target()
+	if target:
+		target.text = text
+	if _ime_submit.is_valid():
+		_ime_submit.call()
+
+
+func _on_ime_inset(px: float) -> void:
+	if absf(px - _keyboard_inset) <= 1.5:
+		return
+	_keyboard_inset = px
+	_fit_panel()
+
+
+func _on_memory_closed() -> void:
+	_bind_ime(input, _send)
 
 
 func _on_head_gui(event: InputEvent) -> void:
@@ -814,6 +1038,9 @@ func _on_head_gui(event: InputEvent) -> void:
 		if OS.has_feature("web"):
 			if _panel:
 				_panel.position += rel
+				var vp := get_viewport_rect().size
+				_panel.position = ChatLayout.clamp_pos(_panel.position, _panel.size, vp)
+				_last_ime_sig = ""
 		else:
 			var win := get_window()
 			win.position = win.position + Vector2i(rel)
@@ -834,6 +1061,10 @@ func _is_press_on_button(event: InputEvent) -> bool:
 
 func _exit_tree() -> void:
 	_interrupt_speech()
+	if _web_input:
+		_web_input.close()
+	if attach:
+		attach.hide_picker()
 	if voice:
 		voice.close_pip()
 	if _mini and not OS.has_feature("web"):

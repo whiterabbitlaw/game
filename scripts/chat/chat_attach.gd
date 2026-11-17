@@ -4,6 +4,7 @@ extends Node
 
 signal file_picked(kind: String, bytes: PackedByteArray, mime: String, name: String)
 signal cancelled
+signal pick_failed(message: String)
 
 var _js_cb: JavaScriptObject
 var _busy := false
@@ -56,7 +57,7 @@ func _pick_web(kind: String, accept: String) -> void:
 	  i.onchange = function(){
 	    var f = i.files && i.files[0];
 	    if(!f){ if(window.qiyunjuOnFile) window.qiyunjuOnFile(JSON.stringify({kind:kind, cancelled:true})); return; }
-	    if(f.size > 2.5*1024*1024){ if(window.qiyunjuOnFile) window.qiyunjuOnFile(JSON.stringify({kind:kind, error:'file too large'})); return; }
+	    if(f.size > 18*1024*1024){ if(window.qiyunjuOnFile) window.qiyunjuOnFile(JSON.stringify({kind:kind, error:'file too large'})); return; }
 	    var r = new FileReader();
 	    r.onload = function(){
 	      var s = String(r.result||'');
@@ -82,8 +83,12 @@ func _on_js_file(args: Array) -> void:
 		cancelled.emit()
 		return
 	var d: Dictionary = parsed
-	if bool(d.get("cancelled", false)) or str(d.get("error", "")) != "":
+	if bool(d.get("cancelled", false)):
 		cancelled.emit()
+		return
+	var err := str(d.get("error", "")).strip_edges()
+	if err != "":
+		pick_failed.emit(ChatVision.picker_error(err))
 		return
 	var b64 := str(d.get("data", ""))
 	var bytes := Marshalls.base64_to_raw(b64) if b64 != "" else PackedByteArray()
@@ -143,3 +148,26 @@ func _load_path(kind: String, path: String) -> void:
 	if map.has(ext):
 		mime = map[ext]
 	file_picked.emit(kind, bytes, mime, path.get_file())
+
+
+func place_picker(rect: Rect2, viewport: Vector2) -> void:
+	var files = _files_api()
+	if files == null:
+		return
+	files.place(rect.position.x, rect.position.y, rect.size.x, rect.size.y, viewport.x, viewport.y)
+
+
+func hide_picker() -> void:
+	var files = _files_api()
+	if files == null:
+		return
+	files.hide()
+
+
+func _files_api() -> JavaScriptObject:
+	if not OS.has_feature("web"):
+		return null
+	var has: Variant = JavaScriptBridge.eval("typeof window.qiyunjuFiles==='object'", true)
+	if has != true and str(has) != "true":
+		return null
+	return JavaScriptBridge.get_interface("qiyunjuFiles")

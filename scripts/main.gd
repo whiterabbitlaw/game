@@ -334,6 +334,9 @@ func _run_demo(mode: String) -> void:
 			play_story("grok_s2", true)
 		"detail":
 			open_detail("grok")
+		"chat":
+			open_detail("claude")
+			open_free_chat("claude")
 		"breakthrough":
 			switch_tab("cultivate")
 			await get_tree().create_timer(0.8).timeout
