@@ -38,6 +38,10 @@ var _voice_stt := false
 var _vision_expect := 0
 var _vision_parts: PackedStringArray = PackedStringArray()
 var _hint: Label
+var _dim: ColorRect
+var _ptt_held := false
+var _drag_ready := false
+var _wait_gen := 0
 
 
 func open_chat(id: String) -> void:
@@ -63,8 +67,10 @@ func open_chat(id: String) -> void:
 func _build() -> void:
 	var d := Data.char_def(char_id)
 	var dim := ColorRect.new()
+	_dim = dim
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	dim.color = Color(0.08, 0.07, 0.14, 0.55)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(dim)
 	var panel := PanelContainer.new()
 	_panel = panel
@@ -180,6 +186,8 @@ func _build() -> void:
 	voice.error_text.connect(func(msg: String): _set_status(msg))
 	voice.frames_ready.connect(_on_video_frames)
 	voice.pip_event.connect(_on_pip_event)
+	set_process_input(true)
+	set_process_unhandled_input(true)
 	_sync_tts_btn()
 	_maybe_background_memory()
 	player = AudioStreamPlayer.new()
@@ -215,18 +223,45 @@ func _send() -> void:
 	memory.append("user", text)
 	_bubble("user", text)
 	_waiting = true
-	send_btn.disabled = true
+	if send_btn:
+		send_btn.disabled = true
 	if voice:
 		voice.set_state(ChatVoiceSession.STATE_THINKING)
 	_set_status("正在想…")
+	_arm_wait_timeout(30.0, "想太久了，请再试一次。")
 	var packed := assembler.assemble(char_id, memory.recent(30), text, memory, _note, ChatPromptAssembler.DEFAULT_BUDGET, _attachments)
 	_attachments = []
 	client.chat(packed["messages"])
 
 
-func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
+func _clear_wait() -> void:
+	_wait_gen += 1
 	_waiting = false
-	send_btn.disabled = false
+	if send_btn:
+		send_btn.disabled = false
+
+
+func _arm_wait_timeout(sec: float, msg: String) -> void:
+	_wait_gen += 1
+	var g := _wait_gen
+	get_tree().create_timer(sec).timeout.connect(func():
+		if g != _wait_gen:
+			return
+		if not _waiting:
+			return
+		_clear_wait()
+		_set_status(msg)
+		if voice:
+			voice.set_busy(false)
+			if voice.mode == "handsfree":
+				voice.set_state(ChatVoiceSession.STATE_LISTENING, "免提")
+			else:
+				voice.set_state(ChatVoiceSession.STATE_IDLE)
+	)
+
+
+func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
+	_clear_wait()
 	if not ok:
 		_set_status(text)
 		if voice:
@@ -358,6 +393,8 @@ func _wav_from_bytes(bytes: PackedByteArray) -> AudioStreamWAV:
 func _toggle_tts() -> void:
 	client.cfg.tts_enabled = not client.cfg.tts_enabled
 	client.cfg.save()
+	set_process_input(true)
+	set_process_unhandled_input(true)
 	_sync_tts_btn()
 	if not client.cfg.tts_enabled:
 		_interrupt_speech()
@@ -369,14 +406,38 @@ func _sync_tts_btn() -> void:
 
 
 func _on_ptt_down() -> void:
+	_ptt_held = true
 	_interrupt_speech()
 	if voice:
 		voice.ptt_down()
 
 
 func _on_ptt_up() -> void:
+	if not _ptt_held:
+		return
+	_ptt_held = false
 	if voice:
 		voice.ptt_up()
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	_maybe_release_ptt(event)
+
+
+func _input(event: InputEvent) -> void:
+	_maybe_release_ptt(event)
+
+
+func _maybe_release_ptt(event: InputEvent) -> void:
+	if not _ptt_held:
+		return
+	var released := false
+	if event is InputEventScreenTouch and not event.pressed:
+		released = true
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		released = true
+	if released:
+		_on_ptt_up()
 
 
 func _toggle_handsfree() -> void:
@@ -420,6 +481,9 @@ func _on_utterance(wav: PackedByteArray, _mime: String) -> void:
 	if voice:
 		voice.set_state(ChatVoiceSession.STATE_THINKING)
 	_set_status("正在听写…")
+	_arm_wait_timeout(20.0, "听写超时，请再试一次。")
+	# _waiting is also used so the watchdog can reset listening state
+	_waiting = true
 	client.stt(Marshalls.raw_to_base64(wav), "wav", "zh")
 
 
@@ -532,7 +596,9 @@ func _on_vision(ok: bool, text: String, _raw: Dictionary) -> void:
 func _on_stt(ok: bool, text: String, _raw: Dictionary) -> void:
 	if _voice_stt:
 		_voice_stt = false
-		if not ok or text.strip_edges() == "":
+		_clear_wait()
+		text = ChatTextUtil.to_simplified(text.strip_edges())
+		if not ok or text == "":
 			_set_status(text if text != "" else "没听清，请再试一次。")
 			if voice and voice.mode == "handsfree":
 				voice.set_state(ChatVoiceSession.STATE_LISTENING, "免提")
@@ -679,7 +745,13 @@ func _apply_compact_panel(compact: bool) -> void:
 				break
 	if _panel == null:
 		return
+	# 手机气泡不要用全屏遮罩吞掉点击；只让气泡自己接收触摸。
 	if compact:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if _dim:
+			_dim.visible = false
+			_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 		_panel.position = Vector2(20, 200)
 		_panel.size = Vector2(460, 820)
 		if scroll:
@@ -689,6 +761,11 @@ func _apply_compact_panel(compact: bool) -> void:
 		if status_lbl:
 			status_lbl.custom_minimum_size = Vector2(420, 0)
 	else:
+		mouse_filter = Control.MOUSE_FILTER_STOP
+		if _dim:
+			_dim.visible = true
+			_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+		_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 		_panel.position = Vector2(20, 80)
 		_panel.size = Vector2(680, 1120)
 		if scroll:
@@ -702,19 +779,57 @@ func _apply_compact_panel(compact: bool) -> void:
 func _on_head_gui(event: InputEvent) -> void:
 	if not (_mini or _web_bubble):
 		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		_dragging = event.pressed
-		if _panel:
-			_drag_off = event.position
-		if OS.has_feature("web") == false and event.pressed:
-			pass
-	elif event is InputEventMouseMotion and _dragging:
+	# 点在按钮上不要开始拖，否则手机上轻轻一滑就吃掉点击。
+	if _is_press_on_button(event):
+		_dragging = false
+		_drag_ready = false
+		return
+	var pressed := false
+	var released := false
+	var rel := Vector2.ZERO
+	if event is InputEventScreenTouch:
+		pressed = event.pressed
+		released = not event.pressed
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		pressed = event.pressed
+		released = not event.pressed
+	elif event is InputEventScreenDrag:
+		rel = event.relative
+	elif event is InputEventMouseMotion:
+		rel = event.relative
+	if pressed:
+		_drag_ready = true
+		_dragging = false
+		_drag_off = event.position
+		return
+	if released:
+		_drag_ready = false
+		_dragging = false
+		return
+	if rel != Vector2.ZERO and _drag_ready:
+		if not _dragging:
+			if rel.length() < 12.0:
+				return
+			_dragging = true
 		if OS.has_feature("web"):
 			if _panel:
-				_panel.position += event.relative
+				_panel.position += rel
 		else:
 			var win := get_window()
-			win.position = win.position + Vector2i(event.relative)
+			win.position = win.position + Vector2i(rel)
+		accept_event()
+
+
+func _is_press_on_button(event: InputEvent) -> bool:
+	if not ((event is InputEventMouseButton and event.pressed) or (event is InputEventScreenTouch and event.pressed)):
+		return false
+	var hovered := get_viewport().gui_get_hovered_control() if get_viewport() else null
+	var n: Control = hovered
+	while n:
+		if n is BaseButton:
+			return true
+		n = n.get_parent() as Control
+	return false
 
 
 func _exit_tree() -> void:

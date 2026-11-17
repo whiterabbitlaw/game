@@ -24,22 +24,28 @@ var _tts_http: HTTPRequest
 var _tts_busy := false
 var _tts_q: Array = []
 var _tts_cur := ""
+var _stt_http: HTTPRequest
+var _stt_busy := false
 
 
 func _ready() -> void:
 	reload_config()
 	_http = HTTPRequest.new()
-	_http.timeout = 90.0
+	_http.timeout = 30.0
 	add_child(_http)
 	_http.request_completed.connect(_on_done)
 	_bg = HTTPRequest.new()
-	_bg.timeout = 90.0
+	_bg.timeout = 30.0
 	add_child(_bg)
 	_bg.request_completed.connect(_on_bg_done)
 	_tts_http = HTTPRequest.new()
-	_tts_http.timeout = 60.0
+	_tts_http.timeout = 20.0
 	add_child(_tts_http)
 	_tts_http.request_completed.connect(_on_tts_http)
+	_stt_http = HTTPRequest.new()
+	_stt_http.timeout = 20.0
+	add_child(_stt_http)
+	_stt_http.request_completed.connect(_on_stt_http)
 
 
 func reload_config() -> void:
@@ -139,7 +145,43 @@ func vision(image_b64: String, prompt: String = "", mime: String = "image/jpeg")
 
 
 func stt(audio_b64: String, format: String = "wav", language: String = "zh") -> void:
-	_enqueue_bg("stt", cfg.worker_path("/v1/stt"), {"audio": audio_b64, "format": format, "language": language})
+	reload_config()
+	if _stt_http == null:
+		stt_finished.emit(false, "听写组件未就绪", {})
+		return
+	if _stt_busy:
+		_stt_http.cancel_request()
+		_stt_busy = false
+	_stt_busy = true
+	var err := _stt_http.request(
+		cfg.worker_path("/v1/stt"),
+		PackedStringArray(["Content-Type: application/json", "Accept: application/json"]),
+		HTTPClient.METHOD_POST,
+		JSON.stringify({"audio": audio_b64, "format": format, "language": language})
+	)
+	if err != OK:
+		_stt_busy = false
+		stt_finished.emit(false, "无法发起听写（%s）" % err, {})
+
+
+func _on_stt_http(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	_stt_busy = false
+	var raw: Dictionary = {}
+	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	if typeof(parsed) == TYPE_DICTIONARY:
+		raw = parsed
+	if result == HTTPRequest.RESULT_TIMEOUT:
+		stt_finished.emit(false, "听写超时，请再试一次。", raw)
+		return
+	var ok := result == HTTPRequest.RESULT_SUCCESS and code >= 200 and code < 300
+	var text := str(raw.get("text", "")).strip_edges()
+	if not ok:
+		var err := str(raw.get("error", "听写失败" if code else "听写请求失败"))
+		if code:
+			err = "听写失败（HTTP %d）" % code if err == "" else err
+		stt_finished.emit(false, err, raw)
+		return
+	stt_finished.emit(true, ChatTextUtil.to_simplified(text), raw)
 
 
 func _enqueue_bg(mode: String, url: String, body: Dictionary) -> void:
@@ -208,7 +250,9 @@ func _on_done(result: int, code: int, _headers: PackedStringArray, body: PackedB
 	_kind = ""
 	if result != HTTPRequest.RESULT_SUCCESS or code < 200 or code >= 300:
 		var hint := "请求失败"
-		if result != HTTPRequest.RESULT_SUCCESS:
+		if result == HTTPRequest.RESULT_TIMEOUT:
+			hint = "想太久了，请再试一次。"
+		elif result != HTTPRequest.RESULT_SUCCESS:
 			if kind == ChatConfig.PROVIDER_WORKER:
 				hint = "连不上畅聊服务（%s）" % cfg.worker_url
 			else:

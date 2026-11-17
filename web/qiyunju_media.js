@@ -9,8 +9,10 @@
   var recording = false;
   var mode = "push";
   var speakingOut = false;
-  var samples = [];
+  var samples = null;
+  var sampleLen = 0;
   var sampleRate = 16000;
+  var MAX_SAMPLES = 16000 * 15;
   var speechMs = 0;
   var silenceMs = 0;
   var started = false;
@@ -37,15 +39,34 @@
   }
 
   function downsample(float32, fromRate, toRate) {
-    if (fromRate === toRate) return float32;
+    if (fromRate === toRate) {
+      var copy = new Float32Array(float32.length);
+      copy.set(float32);
+      return copy;
+    }
     var step = fromRate / toRate;
-    var out = [];
-    for (var x = 0; x < float32.length; x += step) out.push(float32[Math.floor(x)] || 0);
+    var n = Math.max(1, Math.floor(float32.length / step));
+    var out = new Float32Array(n);
+    var i = 0;
+    for (var x = 0; i < n && x < float32.length; x += step, i++) out[i] = float32[Math.floor(x)] || 0;
     return out;
   }
 
-  function encodeWav(floatArr, rate) {
-    var n = floatArr.length;
+  function resetBuf() {
+    if (!samples) samples = new Float32Array(MAX_SAMPLES);
+    sampleLen = 0;
+  }
+
+  function pushMono(mono) {
+    if (!samples) resetBuf();
+    var n = Math.min(mono.length, MAX_SAMPLES - sampleLen);
+    if (n <= 0) return;
+    samples.set(mono.length === n ? mono : mono.subarray(0, n), sampleLen);
+    sampleLen += n;
+  }
+
+  function encodeWav(floatArr, n, rate) {
+    n = n == null ? floatArr.length : n;
     var buf = new ArrayBuffer(44 + n * 2);
     var v = new DataView(buf);
     function str(o, s) { for (var i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); }
@@ -68,8 +89,12 @@
       v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
     }
     var bytes = new Uint8Array(buf);
+    var chunk = 0x8000;
     var bin = "";
-    for (var j = 0; j < bytes.length; j++) bin += String.fromCharCode(bytes[j]);
+    for (var j = 0; j < bytes.length; j += chunk) {
+      var sub = bytes.subarray(j, Math.min(j + chunk, bytes.length));
+      bin += String.fromCharCode.apply(null, sub);
+    }
     return btoa(bin);
   }
 
@@ -78,21 +103,20 @@
     started = false;
     speechMs = 0;
     silenceMs = 0;
-    var arr = samples;
-    samples = [];
-    if (arr.length < sampleRate * 0.25) {
+    var n = sampleLen;
+    sampleLen = 0;
+    if (n < sampleRate * 0.25) {
       emit({ type: "error", message: "说话时间太短" });
       if (mode === "handsfree") emit({ type: "state", state: "listening" });
       return;
     }
-    if (arr.length > sampleRate * 15) arr = arr.slice(arr.length - sampleRate * 15);
-    emit({ type: "audio", mime: "audio/wav", data: encodeWav(arr, sampleRate) });
+    emit({ type: "audio", mime: "audio/wav", data: encodeWav(samples, n, sampleRate) });
   }
 
   function onAudio(floatFromRate, fromRate) {
     var mono = downsample(floatFromRate, fromRate, sampleRate);
     if (mode === "push") {
-      if (recording) for (var i = 0; i < mono.length; i++) samples.push(mono[i]);
+      if (recording) pushMono(mono);
       return;
     }
     var level = rms(mono);
@@ -104,7 +128,8 @@
           bargeMs = 0;
           recording = true;
           started = true;
-          samples = mono.slice();
+          resetBuf();
+          pushMono(mono);
           emit({ type: "barge" });
           emit({ type: "state", state: "listening", detail: "打断" });
         }
@@ -119,13 +144,14 @@
           recording = true;
           started = true;
           silenceMs = 0;
-          samples = mono.slice();
+          resetBuf();
+          pushMono(mono);
           emit({ type: "state", state: "listening" });
         }
       } else speechMs = 0;
       return;
     }
-    for (var k = 0; k < mono.length; k++) samples.push(mono[k]);
+    pushMono(mono);
     if (level < THRESH) {
       silenceMs += dt;
       if (silenceMs >= SILENCE) flushUtterance();
@@ -134,36 +160,53 @@
 
   media.init = function () {};
 
+  function warmAudio() {
+    try {
+      if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === "suspended") ctx.resume();
+    } catch (e) {}
+  }
+
+  ["pointerdown", "touchstart", "mousedown", "click"].forEach(function (ev) {
+    document.addEventListener(ev, warmAudio, { capture: true, passive: true });
+  });
+
   media.startMic = async function (opts) {
     opts = opts || {};
     mode = opts.mode || "handsfree";
     try {
+      // 先同步创建/恢复 AudioContext，尽量留在移动端用户手势里。
+      warmAudio();
       if (!stream) {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         });
       }
-      if (!ctx) {
-        ctx = new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx && ctx.state === "suspended") await ctx.resume();
+      if (stream && ctx && !source) {
         source = ctx.createMediaStreamSource(stream);
         analyser = ctx.createAnalyser();
         analyser.fftSize = 2048;
         source.connect(analyser);
-        processor = ctx.createScriptProcessor(4096, 1, 1);
-        processor.onaudioprocess = function (ev) {
-          var data = ev.inputBuffer.getChannelData(0);
-          var copy = new Float32Array(data.length);
-          copy.set(data);
-          onAudio(copy, ev.inputBuffer.sampleRate || ctx.sampleRate || 48000);
-        };
-        analyser.connect(processor);
-        var mute = ctx.createGain();
-        mute.gain.value = 0;
-        processor.connect(mute);
-        mute.connect(ctx.destination);
+        if (ctx.createScriptProcessor) {
+          processor = ctx.createScriptProcessor(4096, 1, 1);
+          processor.onaudioprocess = function (ev) {
+            var data = ev.inputBuffer.getChannelData(0);
+            var copy = new Float32Array(data.length);
+            copy.set(data);
+            onAudio(copy, ev.inputBuffer.sampleRate || ctx.sampleRate || 48000);
+          };
+          analyser.connect(processor);
+          var mute = ctx.createGain();
+          mute.gain.value = 0;
+          processor.connect(mute);
+          mute.connect(ctx.destination);
+        } else {
+          emit({ type: "error", message: "当前浏览器不支持实时录音，请换 Chrome / Edge 再试。" });
+          return;
+        }
       }
-      if (ctx.state === "suspended") await ctx.resume();
-      samples = [];
+      resetBuf();
       recording = mode === "push";
       started = false;
       speechMs = 0;
@@ -176,7 +219,7 @@
 
   media.stopMic = function () {
     recording = false;
-    samples = [];
+    sampleLen = 0;
     if (stream) {
       stream.getTracks().forEach(function (t) { t.stop(); });
       stream = null;
@@ -198,8 +241,10 @@
   media.pttDown = function () {
     mode = "push";
     recording = true;
-    samples = [];
+    resetBuf();
     emit({ type: "state", state: "listening", detail: "按住说话" });
+    // 同一调用栈里启动麦克风，避免移动端丢失用户手势。
+    media.startMic({ mode: "push" });
   };
 
   media.pttUp = function () {

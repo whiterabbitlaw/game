@@ -82,10 +82,12 @@ func stop_handsfree() -> void:
 
 func ptt_down() -> void:
 	mode = "push"
-	_start_capture()
 	if OS.has_feature("web"):
+		# pttDown 内部会在同一调用栈里 startMic，避免移动端丢失用户手势。
 		JavaScriptBridge.eval("if(window.qiyunjuMedia&&window.qiyunjuMedia.pttDown){window.qiyunjuMedia.pttDown();}", true)
+		set_state(STATE_LISTENING, "按住说话")
 	else:
+		_start_capture()
 		_recording = true
 		_buf = PackedFloat32Array()
 		set_state(STATE_LISTENING, "按住说话")

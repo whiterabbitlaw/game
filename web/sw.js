@@ -1,6 +1,7 @@
-/* 栖云居 PWA：缓存外壳，大资源首次加载后再缓存。 */
-const SHELL = "qiyunju-shell-v3";
+/* 栖云居 PWA：外壳网络优先，避免手机浏览器一直用旧缓存。 */
+const SHELL = "qiyunju-shell-v4";
 const SHELL_URLS = ["./", "./index.html", "./index.js", "./manifest.webmanifest", "./qiyunju_media.js", "./pip.html"];
+const NETWORK_FIRST = /(?:\/$|index\.html$|index\.js$|qiyunju_media\.js$|sw\.js$|manifest\.webmanifest$|pip(?:\.html)?$)/;
 
 self.addEventListener("install", function (e) {
   e.waitUntil(caches.open(SHELL).then(function (c) { return c.addAll(SHELL_URLS); }).then(function () { self.skipWaiting(); }));
@@ -15,6 +16,18 @@ self.addEventListener("fetch", function (e) {
   if (req.method !== "GET") return;
   var url = new URL(req.url);
   if (url.origin !== location.origin) return;
+  if (NETWORK_FIRST.test(url.pathname)) {
+    e.respondWith(
+      fetch(req).then(function (res) {
+        if (res && res.ok && res.type === "basic") {
+          var copy = res.clone();
+          caches.open(SHELL).then(function (c) { c.put(req, copy); });
+        }
+        return res;
+      }).catch(function () { return caches.match(req).then(function (hit) { return hit || Promise.reject(); }); })
+    );
+    return;
+  }
   e.respondWith(
     caches.match(req).then(function (hit) {
       if (hit) return hit;
