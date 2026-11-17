@@ -15,15 +15,23 @@ func supported() -> bool:
 
 
 func available() -> bool:
+	return _js_says_yes("(window.qiyunjuIme&&typeof window.qiyunjuIme.place==='function')?'yes':'no'")
+
+
+func _js_says_yes(expr: String) -> bool:
 	if not supported():
 		return false
-	var has: Variant = JavaScriptBridge.eval("typeof window.qiyunjuIme==='object'", true)
-	return has == true or str(has) == "true"
+	# eval 的布尔返回在网页里不可靠（可能变成整数 1，和 true 对不上）。只认字符串 yes。
+	return str(JavaScriptBridge.eval(expr, true)) == "yes"
 
 
 func setup() -> void:
-	if _installed or not available():
+	if _installed or not supported():
 		return
+	if not available():
+		return
+	# 先占一个函数，再换成 Godot 回调。麦克风和选文件都是这个顺序，缺这一步时属性写不进去。
+	JavaScriptBridge.eval("window.qiyunjuOnIme=window.qiyunjuOnIme||function(){};", true)
 	_cb = JavaScriptBridge.create_callback(_on_js)
 	var win = JavaScriptBridge.get_interface("window")
 	if win:
@@ -32,7 +40,7 @@ func setup() -> void:
 
 
 func _ime() -> JavaScriptObject:
-	if not available():
+	if not _js_says_yes("(window.qiyunjuIme)?'yes':'no'"):
 		return null
 	return JavaScriptBridge.get_interface("qiyunjuIme")
 
@@ -78,6 +86,33 @@ func close() -> void:
 	if ime == null:
 		return
 	ime.close()
+
+
+func place_log(rect: Rect2, viewport: Vector2) -> void:
+	var chat := _chat()
+	if chat == null:
+		return
+	chat.place(rect.position.x, rect.position.y, rect.size.x, rect.size.y, viewport.x, viewport.y)
+
+
+func set_lines(lines: Array) -> void:
+	var chat := _chat()
+	if chat == null:
+		return
+	chat.setLines(JSON.stringify(lines))
+
+
+func hide_log() -> void:
+	var chat := _chat()
+	if chat == null:
+		return
+	chat.hide()
+
+
+func _chat() -> JavaScriptObject:
+	if not _js_says_yes("(window.qiyunjuChat&&window.qiyunjuChat.setLines)?'yes':'no'"):
+		return null
+	return JavaScriptBridge.get_interface("qiyunjuChat")
 
 
 func poll_inset(viewport: Vector2) -> float:

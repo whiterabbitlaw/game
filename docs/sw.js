@@ -1,7 +1,7 @@
 /* 栖云居 PWA：外壳网络优先，避免手机浏览器一直用旧缓存。 */
-const SHELL = "qiyunju-shell-v6";
-const SHELL_URLS = ["./", "./index.html", "./index.js", "./manifest.webmanifest", "./qiyunju_media.js", "./qiyunju_ime.js", "./qiyunju_files.js", "./pip.html"];
-const NETWORK_FIRST = /(?:\/$|index\.html$|index\.js$|qiyunju_media\.js$|qiyunju_ime\.js$|qiyunju_files\.js$|sw\.js$|manifest\.webmanifest$|pip(?:\.html)?$)/;
+const SHELL = "qiyunju-shell-v7";
+const SHELL_URLS = ["./", "./index.html", "./index.js", "./manifest.webmanifest", "./qiyunju_media.js", "./qiyunju_chat.js", "./qiyunju_ime.js", "./qiyunju_files.js", "./pip.html"];
+const NETWORK_FIRST = /(?:\/$|index\.html$|index\.js$|qiyunju_media\.js$|qiyunju_chat\.js$|qiyunju_ime\.js$|qiyunju_files\.js$|sw\.js$|manifest\.webmanifest$|pip(?:\.html)?$)/;
 
 self.addEventListener("install", function (e) {
   e.waitUntil(caches.open(SHELL).then(function (c) { return c.addAll(SHELL_URLS); }).then(function () { self.skipWaiting(); }));

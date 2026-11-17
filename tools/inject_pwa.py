@@ -15,6 +15,7 @@ HEAD = """
 <meta name="apple-mobile-web-app-title" content="栖云居">
 <link rel="apple-touch-icon" href="index.apple-touch-icon.png">
 <script src="qiyunju_media.js"></script>
+<script src="qiyunju_chat.js"></script>
 <script src="qiyunju_ime.js"></script>
 <script src="qiyunju_files.js"></script>
 <script>
@@ -43,13 +44,15 @@ def inject(dest: Path) -> None:
     html_path = dest / "index.html"
     if not html_path.exists():
         raise SystemExit(f"missing {html_path}")
-    for name in ("qiyunju_media.js", "qiyunju_ime.js", "qiyunju_files.js", "manifest.webmanifest", "sw.js", "pip.html"):
+    for name in ("qiyunju_media.js", "qiyunju_chat.js", "qiyunju_ime.js", "qiyunju_files.js", "manifest.webmanifest", "sw.js", "pip.html"):
         src = WEB / name
         if src.exists():
             shutil.copy2(src, dest / name)
     html = html_path.read_text(encoding="utf-8")
     if "manifest.webmanifest" not in html:
         html = html.replace("</head>", HEAD + "</head>", 1)
+    if "qiyunju_chat.js" not in html:
+        html = html.replace("</head>", '<script src="qiyunju_chat.js"></script>\n</head>', 1)
     if "qiyunju_ime.js" not in html:
         html = html.replace("</head>", '<script src="qiyunju_ime.js"></script>\n</head>', 1)
     if "qiyunju_files.js" not in html:

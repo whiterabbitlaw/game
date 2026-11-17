@@ -235,18 +235,19 @@ func _build() -> void:
 	player.finished.connect(_on_player_finished)
 	add_child(player)
 	if OS.has_feature("web"):
+		input.virtual_keyboard_enabled = false
+		input.focus_mode = Control.FOCUS_NONE
+		input.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_web_input = ChatWebInput.new()
 		add_child(_web_input)
 		_web_input.setup()
-		if _web_input.available():
-			input.virtual_keyboard_enabled = false
-			input.focus_mode = Control.FOCUS_NONE
-			input.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			_web_input.text_event.connect(_on_ime_text)
-			_web_input.submit_event.connect(_on_ime_submit)
-			_web_input.inset_event.connect(_on_ime_inset)
-			_bind_ime(input, _send)
-			set_process(true)
+		_web_input.text_event.connect(_on_ime_text)
+		_web_input.submit_event.connect(_on_ime_submit)
+		_web_input.inset_event.connect(_on_ime_inset)
+		_bind_ime(input, _send)
+		set_process(true)
+		var bar := scroll.get_v_scroll_bar()
+		bar.custom_minimum_size = Vector2(36, 48)
 	_fit_panel()
 	if not get_viewport().size_changed.is_connected(_fit_panel):
 		get_viewport().size_changed.connect(_fit_panel)
@@ -564,9 +565,16 @@ func _bubble(role: String, text: String) -> void:
 	body.custom_minimum_size = Vector2(0, 0)
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	wrap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wrap.set_meta("qy_role", role)
+	wrap.set_meta("qy_who", who)
+	wrap.set_meta("qy_text", text)
+	wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vb.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vb.add_child(body)
 	log_box.add_child(wrap)
 	_scroll_to_end()
+	_push_html_log()
 	if voice:
 		voice.update_pip({"role": role, "who": who, "line": text, "status": status_lbl.text if status_lbl else ""})
 
@@ -839,6 +847,7 @@ func _fit_panel() -> void:
 	_fitting = false
 	_last_ime_sig = ""
 	_sync_ime_rect()
+	_push_html_log()
 
 
 func _apply_panel_rect(r: Rect2) -> void:
@@ -905,6 +914,7 @@ func _current_ime_target() -> LineEdit:
 
 func _sync_ime_rect(force: bool = false) -> void:
 	_sync_file_picker()
+	_place_html_log()
 	if _web_input == null or not _web_input.available():
 		return
 	var target := _current_ime_target()
@@ -921,6 +931,31 @@ func _sync_ime_rect(force: bool = false) -> void:
 	if r.size.x < 2.0 or r.size.y < 2.0:
 		return
 	_web_input.place(r, vp)
+
+
+func _push_html_log() -> void:
+	if _web_input == null or log_box == null:
+		return
+	var lines: Array = []
+	for wrap in log_box.get_children():
+		if not (wrap is CanvasItem) or not (wrap as CanvasItem).has_meta("qy_text"):
+			continue
+		lines.append({
+			"role": str((wrap as CanvasItem).get_meta("qy_role", "")),
+			"who": str((wrap as CanvasItem).get_meta("qy_who", "")),
+			"text": str((wrap as CanvasItem).get_meta("qy_text", "")),
+		})
+	_web_input.set_lines(lines)
+
+
+func _place_html_log() -> void:
+	if _web_input == null or scroll == null or not is_instance_valid(scroll):
+		return
+	var r := scroll.get_global_rect()
+	if r.size.x < 40.0 or r.size.y < 40.0:
+		_web_input.hide_log()
+		return
+	_web_input.place_log(r, get_viewport_rect().size)
 
 
 func _sync_file_picker() -> void:
@@ -1065,6 +1100,8 @@ func _exit_tree() -> void:
 		_web_input.close()
 	if attach:
 		attach.hide_picker()
+	if _web_input:
+		_web_input.hide_log()
 	if voice:
 		voice.close_pip()
 	if _mini and not OS.has_feature("web"):
