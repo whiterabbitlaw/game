@@ -696,10 +696,10 @@ func open_settings() -> void:
 	var m := await modal("设置", vb, [{"t": "关闭", "kind": "gold", "w": 220}])
 	holder[0] = m
 
-func open_chat_settings() -> void:
+func open_chat_settings() -> Control:
 	var form := ChatSettingsForm.new()
 	var body := form.build()
-	await modal("畅聊接口", body, [
+	return await modal("畅聊接口", body, [
 		{"t": "保存", "kind": "jade", "w": 200, "cb": func():
 			form.save()
 			show_toast("已保存在本机，不会上传")},

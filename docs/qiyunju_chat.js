@@ -2,7 +2,7 @@
    活动条拖不动。这一层用浏览器自己的 overflow 滚动，支持滑动和拖动滚动条。 */
 (function (root) {
   "use strict";
-  var BUILD = "chat-9";
+  var BUILD = "chat-10";
   var log = null;
   var scroller = null;
   var bar = null;
@@ -10,22 +10,18 @@
 
   function ensureBadge() {
     if (badge || typeof document === "undefined") return;
+    ensureLog();
     badge = document.createElement("div");
     badge.id = "qiyunju-build";
     badge.textContent = BUILD;
     badge.setAttribute("data-build", BUILD);
-    badge.style.position = "fixed";
-    badge.style.top = "4px";
-    badge.style.left = "50%";
-    badge.style.transform = "translateX(-50%)";
-    badge.style.zIndex = "90";
-    badge.style.padding = "2px 8px";
-    badge.style.borderRadius = "999px";
-    badge.style.background = "rgba(42,38,54,0.88)";
-    badge.style.color = "#f6f1e6";
-    badge.style.font = "12px/1.4 sans-serif";
+    badge.style.flex = "0 0 auto";
+    badge.style.padding = "0 8px 3px";
+    badge.style.color = "#7a7690";
+    badge.style.font = "10px/1.2 sans-serif";
     badge.style.pointerEvents = "none";
-    document.documentElement.appendChild(badge);
+    badge.style.display = "none";
+    log.appendChild(badge);
   }
 
   function trackThumb() {
@@ -61,7 +57,13 @@
     log.style.borderRadius = "12px";
     log.style.pointerEvents = "auto";
     log.style.display = "none";
-    log.style.flexDirection = "row";
+    log.style.flexDirection = "column";
+    log.style.overflow = "hidden";
+    var row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.flex = "1";
+    row.style.minHeight = "0";
+    row.style.flexDirection = "row";
     scroller = document.createElement("div");
     scroller.id = "qiyunju-log-body";
     scroller.style.flex = "1";
@@ -78,16 +80,16 @@
     bar.setAttribute("role", "scrollbar");
     bar.setAttribute("aria-controls", "qiyunju-log-body");
     bar.setAttribute("aria-label", "聊天记录滚动条");
-    bar.style.width = "28px";
-    bar.style.flex = "0 0 28px";
+    bar.style.width = "22px";
+    bar.style.flex = "0 0 22px";
     bar.style.touchAction = "none";
-    bar.style.background = "#efe6d4";
+    bar.style.background = "transparent";
     bar.style.borderRadius = "0 12px 12px 0";
     bar.style.position = "relative";
     var thumb = document.createElement("div");
     thumb.style.position = "absolute";
-    thumb.style.left = "4px";
-    thumb.style.right = "4px";
+    thumb.style.left = "8px";
+    thumb.style.right = "8px";
     thumb.style.top = "0";
     thumb.style.height = "48px";
     thumb.style.borderRadius = "8px";
@@ -114,8 +116,9 @@
       scrollFromBar(e.touches[0].clientY);
       e.preventDefault();
     }, { passive: false });
-    log.appendChild(scroller);
-    log.appendChild(bar);
+    row.appendChild(scroller);
+    row.appendChild(bar);
+    log.appendChild(row);
     document.body.appendChild(log);
     return log;
   }
@@ -161,7 +164,7 @@
       who.style.color = "#7a7690";
       var body = document.createElement("div");
       body.textContent = (line && line.text) || "";
-      body.style.font = "16px/1.45 sans-serif";
+      body.style.font = "13px/1.4 sans-serif";
       body.style.color = "#3b3752";
       body.style.whiteSpace = "pre-wrap";
       body.style.wordBreak = "break-word";
@@ -191,13 +194,15 @@
       }
       var css = placeCss(x, y, w, h, vpW, vpH);
       el.style.display = "flex";
+      if (badge) badge.style.display = "block";
       el.style.left = css.left + "px";
       el.style.top = css.top + "px";
-      el.style.width = Math.max(80, css.width) + "px";
-      el.style.height = Math.max(80, css.height) + "px";
+      el.style.width = Math.max(0, css.width) + "px";
+      el.style.height = Math.max(0, css.height) + "px";
     },
     hide: function () {
       if (log) log.style.display = "none";
+      if (badge) badge.style.display = "none";
     },
     debugFill: function (n) {
       var lines = [];

@@ -96,11 +96,11 @@
     el.style.display = "none";
     el.style.boxSizing = "border-box";
     el.style.margin = "0";
-    el.style.border = "1px solid rgba(217,164,65,0.9)";
+    el.style.border = "1px solid #e2c48a";
     el.style.borderRadius = "12px";
-    el.style.background = "#2a2636";
-    el.style.color = "#f6f1e6";
-    el.style.caretColor = "#f6f1e6";
+    el.style.background = "#fffaf3";
+    el.style.color = "#3b3752";
+    el.style.caretColor = "#3d8b7a";
     el.style.fontFamily = '"Noto Sans SC","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif';
     el.style.touchAction = "auto";
     el.style.webkitUserSelect = "text";
@@ -207,23 +207,12 @@
       var top = css.top;
       var width = css.width;
       var height = css.height;
-      if (typeof window !== "undefined" && window.visualViewport) {
-        var vv = window.visualViewport;
-        var visLeft = vv.offsetLeft;
-        var visTop = vv.offsetTop;
-        var visRight = vv.offsetLeft + vv.width;
-        var visBottom = vv.offsetTop + vv.height;
-        if (left + width > visRight - 4) left = Math.max(visLeft, visRight - width - 4);
-        if (top + height > visBottom - 4) top = Math.max(visTop, visBottom - height - 4);
-        if (left < visLeft) left = visLeft;
-        if (top < visTop) top = visTop;
-      }
       show(el);
       el.style.left = left + "px";
       el.style.top = top + "px";
-      el.style.width = Math.max(48, width) + "px";
-      el.style.height = Math.max(36, height) + "px";
-      el.style.fontSize = Math.max(16, Math.min(22, height * 0.42)) + "px";
+      el.style.width = Math.max(8, width) + "px";
+      el.style.height = Math.max(8, height) + "px";
+      el.style.fontSize = Math.max(12, Math.min(16, height * 0.46)) + "px";
     },
     setText: function (text) {
       var el = ensure();

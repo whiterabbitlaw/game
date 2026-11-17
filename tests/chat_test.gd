@@ -20,6 +20,7 @@ func _initialize() -> void:
 	_test_layout_math()
 	_test_vision_and_length()
 	await _test_chat_panel_layout()
+	await _test_detail_header()
 	if failed == 0:
 		print("chat_test: ALL OK")
 	else:
@@ -442,9 +443,11 @@ func _test_voice_p3() -> void:
 	_ok(ChatTextUtil.to_simplified("小雲今日靈田可曾澆過？") == "小云今日灵田可曾浇过？", "traditional to simplified")
 	_ok(ChatTextUtil.to_simplified("你好") == "你好", "already simplified stays")
 	var sw := FileAccess.get_file_as_string("res://web/sw.js")
-	_ok(sw.find("qiyunju-shell-v7") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v7 network-first")
+	_ok(sw.find("qiyunju-shell-v8") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v8 network-first")
 	var chat_js := FileAccess.get_file_as_string("res://web/qiyunju_chat.js")
-	_ok(chat_js.find("chat-9") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0, "visible build and touch log")
+	_ok(chat_js.find("chat-10") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0, "build chat-10 sits with the log")
+	var ime_js := FileAccess.get_file_as_string("res://web/qiyunju_ime.js")
+	_ok(ime_js.find("#fffaf3") >= 0 and ime_js.find("Math.max(36") < 0, "composer uses parchment and the reserved height")
 	var ime_src := FileAccess.get_file_as_string("res://scripts/chat/chat_web_input.gd")
 	_ok(ime_src.find("?'yes':'no'") >= 0 and ime_src.find("qiyunjuOnIme") >= 0, "ime bridge uses string yes and installs callback")
 	var ime := FileAccess.get_file_as_string("res://web/qiyunju_ime.js")
@@ -572,6 +575,42 @@ func _test_chat_panel_layout() -> void:
 	host.queue_free()
 
 
+func _test_detail_header() -> void:
+	print("== detail header ==")
+	var host := Control.new()
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.add_child(host)
+	var view = load("res://scripts/detail.gd").new()
+	host.add_child(view)
+	view.show_char("claude")
+	for _i in 4:
+		await process_frame
+	var back: Control = _part(view, "back")
+	var talk: Control = _part(view, "talk")
+	var title: Control = _part(view, "title")
+	_ok(back != null and talk != null and title != null, "detail has nav and title")
+	if back and title:
+		var br: Rect2 = back.get_global_rect()
+		var tr: Rect2 = talk.get_global_rect() if talk else Rect2()
+		var nr: Rect2 = title.get_global_rect()
+		_ok(br.end.y <= nr.position.y + 1.0, "返回 sits above the title (%s / %s)" % [br, nr])
+		_ok(tr.end.y <= nr.position.y + 1.0, "畅聊 sits above the title (%s / %s)" % [tr, nr])
+		_ok(br.size.y >= 44.0 and tr.size.y >= 44.0, "detail nav keeps a touch target")
+		_ok(not br.intersects(nr) and not tr.intersects(nr), "nav does not cover the title glyphs")
+	view.queue_free()
+	host.queue_free()
+
+
+func _part(n: Node, name: String) -> Control:
+	if n is CanvasItem and (n as CanvasItem).has_meta("qy_part") and str((n as CanvasItem).get_meta("qy_part")) == name:
+		return n as Control
+	for c in n.get_children():
+		var found := _part(c, name)
+		if found:
+			return found
+	return null
+
+
 func _assert_panel_fits(panel, vp_rect: Rect2, tag: String) -> void:
 	if panel._panel == null:
 		_ok(false, tag + " panel exists")
@@ -582,6 +621,11 @@ func _assert_panel_fits(panel, vp_rect: Rect2, tag: String) -> void:
 	var buttons: Array = []
 	_collect_buttons(panel._panel, buttons)
 	_ok(buttons.size() >= 8, "%s has header and composer buttons (%d)" % [tag, buttons.size()])
+	if panel.input and panel.ptt_btn and panel.ptt_btn.visible:
+		var ir: Rect2 = panel.input.get_global_rect()
+		var pr: Rect2 = panel.ptt_btn.get_global_rect()
+		_ok(ir.end.y <= pr.position.y + 1.0, "%s composer row ends above 按住说 (%s vs %s)" % [tag, ir, pr])
+		_ok(ir.size.y >= 44.0, "%s composer keeps a touch-sized row (%s)" % [tag, ir.size.y])
 	for b in buttons:
 		var btn := b as BaseButton
 		if not btn.visible:

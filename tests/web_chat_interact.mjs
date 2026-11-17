@@ -89,13 +89,16 @@ try {
       const log = document.getElementById('qiyunju-log-body') || shell;
       const badge = document.getElementById('qiyunju-build');
       const shown = shell && shell.style.display !== 'none';
+      const shellBox = shown && shell ? shell.getBoundingClientRect() : null;
+      const badgeBox = badge && badge.style.display !== 'none' ? badge.getBoundingClientRect() : null;
       const ir = ime && ime.style.display !== 'none' ? ime.getBoundingClientRect() : null;
       const lr = shown && log ? log.getBoundingClientRect() : null;
       const hit = ir ? document.elementFromPoint(ir.left + ir.width / 2, ir.top + Math.min(ir.height / 2, ir.height - 2)) : null;
       return JSON.stringify({
         build: badge ? badge.textContent : '',
+        badge: badgeBox && shellBox ? { y: badgeBox.top, shellTop: shellBox.top, shellBottom: shellBox.bottom } : null,
         onIme: typeof window.qiyunjuOnIme,
-        ime: ime && ime.style.display === 'block' ? { x: ir.left, y: ir.top, w: ir.width, h: ir.height, hit: hit && (hit.id || hit.tagName) } : null,
+        ime: ime && ime.style.display === 'block' ? { x: ir.left, y: ir.top, w: ir.width, h: ir.height, bg: getComputedStyle(ime).backgroundColor, hit: hit && (hit.id || hit.tagName) } : null,
         log: shown && lr ? { x: lr.left, y: lr.top, w: lr.width, h: lr.height, text: log.textContent.slice(0, 80), hscroll: log.scrollHeight, client: log.clientHeight } : null,
         splash: !!document.getElementById('status')
       });
@@ -105,7 +108,12 @@ try {
     await sleep(1000);
   }
   console.log("state", JSON.stringify(state));
-  ok(state && state.build === "chat-9", "visible build chat-9");
+  ok(state && state.build === "chat-10", "visible build chat-10");
+  ok(state && state.badge && state.badge.y > state.badge.shellTop + 40 && state.badge.y < state.badge.shellBottom + 2, "build id sits in the log footer, not on the title");
+  ok(state && state.ime && state.log && state.log.y + state.log.h <= state.ime.y + 2, "history ends above the composer");
+  ok(state && state.ime && state.ime.h <= 40, "composer is not an oversized slab " + (state && state.ime && state.ime.h));
+  ok(state && state.ime && state.ime.h >= 24, "composer stays a tappable row " + (state && state.ime && state.ime.h));
+  ok(state && state.ime && String(state.ime.bg).indexOf("42, 38, 54") < 0, "composer is not the dark slab " + (state && state.ime && state.ime.bg));
   ok(state && state.onIme === "function", "Godot installed qiyunjuOnIme");
   ok(state && state.ime && state.ime.hit === "qiyunju-ime", "tap target is the HTML field " + (state && state.ime && state.ime.hit));
   ok(state && state.log && state.log.text.includes("热茶"), "HTML history shows the real greeting");

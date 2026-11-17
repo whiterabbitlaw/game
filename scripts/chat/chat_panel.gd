@@ -48,6 +48,8 @@ var _drag_ready := false
 var _wait_gen := 0
 var _keyboard_inset := 0.0
 var _web_input: ChatWebInput
+var _overlay_hold := false
+var _log_hold := false
 var _ime_target: LineEdit
 var _ime_submit: Callable
 var _fitting := false
@@ -104,12 +106,19 @@ func _build() -> void:
 		if main:
 			main.close_free_chat())
 	head.add_child(back)
-	title_lbl = UI.brush_lbl("%s·畅聊" % str(d.get("title", "")), 34, d.get("color", UI.INK).darkened(0.2), HORIZONTAL_ALIGNMENT_LEFT)
-	title_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_lbl.clip_text = true
-	title_lbl.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	title_lbl.custom_minimum_size = Vector2(0, 0)
+	title_lbl = UI.brush_lbl(str(d.get("title", "")), 32, d.get("color", UI.INK).darkened(0.2), HORIZONTAL_ALIGNMENT_LEFT)
+	title_lbl.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	title_lbl.clip_text = false
+	title_lbl.custom_minimum_size = Vector2(160, 40)
 	head.add_child(title_lbl)
+	var chat_tag := UI.lbl("畅聊", 20, UI.INK_SOFT, true)
+	chat_tag.custom_minimum_size = Vector2(52, 0)
+	chat_tag.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	head.add_child(chat_tag)
+	var head_spacer := Control.new()
+	head_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	head.add_child(head_spacer)
 	head.gui_input.connect(_on_head_gui)
 	var actions := HBoxContainer.new()
 	actions.add_theme_constant_override("separation", 8)
@@ -118,9 +127,7 @@ func _build() -> void:
 	tts_btn.pressed.connect(_toggle_tts)
 	actions.add_child(tts_btn)
 	var setb := _flex_btn("接口", "ghost")
-	setb.pressed.connect(func():
-		if main:
-			main.open_chat_settings())
+	setb.pressed.connect(_open_settings)
 	actions.add_child(setb)
 	var memb := _flex_btn("记忆", "ghost")
 	memb.pressed.connect(_open_memory)
@@ -162,7 +169,20 @@ func _build() -> void:
 	input.placeholder_text = "对她说点什么……"
 	input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	input.custom_minimum_size = Vector2(0, 52)
-	input.add_theme_font_size_override("font_size", 22)
+	input.add_theme_font_size_override("font_size", 20)
+	input.add_theme_color_override("font_color", UI.INK)
+	input.add_theme_color_override("font_placeholder_color", UI.INK_SOFT)
+	input.add_theme_color_override("caret_color", UI.JADE_DEEP)
+	var field := StyleBoxFlat.new()
+	field.bg_color = Color("#fffaf3")
+	field.border_color = Color("#e2c48a")
+	field.set_border_width_all(1)
+	field.set_corner_radius_all(12)
+	field.content_margin_left = 12
+	field.content_margin_right = 12
+	input.add_theme_stylebox_override("normal", field)
+	input.add_theme_stylebox_override("focus", field)
+	input.add_theme_stylebox_override("read_only", field)
 	input.text_submitted.connect(func(_t): _send())
 	row.add_child(input)
 	send_btn = _flex_btn("发送", "jade")
@@ -780,6 +800,9 @@ func _on_pip_event(event: String, payload: Dictionary) -> void:
 
 
 func _open_memory() -> void:
+	_log_hold = true
+	if _web_input:
+		_web_input.hide_log()
 	var view := ChatMemoryView.new()
 	view.pull_text = _pull_ime_value
 	view.push_text = _push_ime_text
@@ -788,6 +811,39 @@ func _open_memory() -> void:
 	view.setup(memory)
 	if view.composer():
 		_bind_ime(view.composer(), view._on_add)
+
+
+func _open_settings() -> void:
+	_suspend_html()
+	if main == null or not main.has_method("open_chat_settings"):
+		_resume_html()
+		return
+	var dlg = await main.open_chat_settings()
+	if is_instance_valid(dlg):
+		if not dlg.tree_exited.is_connected(_resume_html):
+			dlg.tree_exited.connect(_resume_html, CONNECT_ONE_SHOT)
+	else:
+		_resume_html()
+
+
+func _suspend_html() -> void:
+	_overlay_hold = true
+	_log_hold = true
+	if _web_input == null:
+		return
+	_web_input.hide()
+	_web_input.hide_log()
+	if attach:
+		attach.hide_picker()
+
+
+func _resume_html() -> void:
+	_overlay_hold = false
+	_log_hold = false
+	_last_ime_sig = ""
+	_bind_ime(input, _send)
+	_place_html_log()
+	_push_html_log()
 
 
 func toggle_mini() -> void:
@@ -913,6 +969,13 @@ func _current_ime_target() -> LineEdit:
 
 
 func _sync_ime_rect(force: bool = false) -> void:
+	if _overlay_hold:
+		if _web_input:
+			_web_input.hide()
+			_web_input.hide_log()
+		if attach:
+			attach.hide_picker()
+		return
 	_sync_file_picker()
 	_place_html_log()
 	if _web_input == null or not _web_input.available():
@@ -950,6 +1013,9 @@ func _push_html_log() -> void:
 
 func _place_html_log() -> void:
 	if _web_input == null or scroll == null or not is_instance_valid(scroll):
+		return
+	if _overlay_hold or _log_hold:
+		_web_input.hide_log()
 		return
 	var r := scroll.get_global_rect()
 	if r.size.x < 40.0 or r.size.y < 40.0:
@@ -1032,7 +1098,7 @@ func _on_ime_inset(px: float) -> void:
 
 
 func _on_memory_closed() -> void:
-	_bind_ime(input, _send)
+	_resume_html()
 
 
 func _on_head_gui(event: InputEvent) -> void:
