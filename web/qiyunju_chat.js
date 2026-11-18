@@ -2,7 +2,7 @@
    活动条拖不动。这一层用浏览器自己的 overflow 滚动，支持滑动和拖动滚动条。 */
 (function (root) {
   "use strict";
-  var BUILD = "chat-10";
+  var BUILD = "chat-11";
   var log = null;
   var scroller = null;
   var bar = null;
@@ -119,6 +119,17 @@
     row.appendChild(scroller);
     row.appendChild(bar);
     log.appendChild(row);
+    var note = document.createElement("div");
+    note.id = "qiyunju-note";
+    note.style.display = "none";
+    note.style.flex = "0 0 auto";
+    note.style.maxHeight = "2.8em";
+    note.style.overflow = "hidden";
+    note.style.padding = "2px 8px 0";
+    note.style.color = "#3d8b7a";
+    note.style.font = "12px/1.35 sans-serif";
+    note.style.pointerEvents = "none";
+    log.appendChild(note);
     document.body.appendChild(log);
     return log;
   }
@@ -199,6 +210,15 @@
       el.style.top = css.top + "px";
       el.style.width = Math.max(0, css.width) + "px";
       el.style.height = Math.max(0, css.height) + "px";
+    },
+    setNote: function (text) {
+      var el = ensureLog();
+      if (!el) return;
+      var note = document.getElementById("qiyunju-note");
+      if (!note) return;
+      var t = text == null ? "" : String(text).replace(/\s+/g, " ").trim();
+      note.textContent = t;
+      note.style.display = t ? "block" : "none";
     },
     hide: function () {
       if (log) log.style.display = "none";

@@ -3,8 +3,27 @@ extends RefCounted
 ## 看图：把原图压到可上传的大小，并把「真正看见的描述」写进这轮和之后的对话。
 ## 没有描述时不要假装已经看懂。
 
-const PROMPT := "只根据画面本身用简体中文描述：主体、颜色、数量、场景、画面里能读到的文字。不要编故事，不要评价画质。看不清就说看不清。80到160字。"
-const MAX_SIDE := 1024
+## 线上 Worker 会把提示截到 400 字。这里留在 380 以内，并把玩家的问题放进去。
+const PROMPT_LIMIT := 380
+const MAX_SIDE := 1280
+
+static func prompt_for(question: String) -> String:
+	var base := "用简体中文看图。先写和问题直接相关的细节：物体、彼此关系、可读文字、界面按钮、数量、颜色、位置。看不清就写看不清，不要编，不要写故事。"
+	var q := question.strip_edges()
+	if q == "":
+		var plain := base + "没有具体问题时，按这些项目把画面写清楚，方便之后追问。"
+		return plain.substr(0, PROMPT_LIMIT)
+	var prefix := base + "问题："
+	var room := PROMPT_LIMIT - prefix.length()
+	if room < 8:
+		return base.substr(0, PROMPT_LIMIT)
+	if q.length() > room:
+		q = q.substr(0, room)
+	return prefix + q
+
+
+static func prompt() -> String:
+	return prompt_for("")
 
 
 static func prepare_image(bytes: PackedByteArray, mime: String) -> Dictionary:
@@ -22,7 +41,7 @@ static func prepare_image(bytes: PackedByteArray, mime: String) -> Dictionary:
 	if side > MAX_SIDE:
 		var scale := float(MAX_SIDE) / float(side)
 		img.resize(maxi(1, int(round(w * scale))), maxi(1, int(round(h * scale))), Image.INTERPOLATE_BILINEAR)
-	var jpg := img.save_jpg_to_buffer(0.82)
+	var jpg := img.save_jpg_to_buffer(0.8)
 	if jpg.is_empty():
 		return {"ok": false, "error": "图片压缩失败，没有送出。"}
 	return {"ok": true, "b64": Marshalls.raw_to_base64(jpg), "mime": "image/jpeg", "bytes": jpg.size()}

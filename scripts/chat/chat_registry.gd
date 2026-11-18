@@ -215,7 +215,7 @@ class _MemoryModule extends ChatModule:
 			return []
 		var parts: PackedStringArray = []
 		if memory.summary() != "":
-			parts.append("【较早对话的摘要】\n" + memory.summary())
+			parts.append("【摘要用法】下面是更早的对话压缩。玩家说过的称呼、喜好和约定可以沿用。她自己反复讲的景物、花和本子，若不是玩家先提起的，不要当成必须再讲的事。\n【较早对话的摘要】\n" + memory.summary())
 		var query := str(ctx.get("user_text", ""))
 		for m in ctx.get("history", []):
 			query += "\n" + str(m.get("content", ""))
@@ -248,7 +248,7 @@ class _MultimodalModule extends ChatModule:
 		var att: Array = ctx.get("attachments", [])
 		if att.is_empty():
 			return []
-		var lines: PackedStringArray = ["【玩家本轮附上了媒体。下面是模型真正看到的描述，请只根据这些画面细节回答，不要说自己看不到，也不要改成向日葵、笔记等角色习惯话题。描述里没有的东西不要编。】"]
+		var lines: PackedStringArray = ["【玩家本轮附上了媒体。下面是看图模型按玩家的问题写下的描述，不是你亲眼所见的原图。先用这些细节回答问题：关系、文字、界面、数量和位置都要照描述说。描述里没有的就说没写到，不要改口去讲角色习惯的景物。】"]
 		for a in att:
 			var kind := str(a.get("kind", "image"))
 			var desc := str(a.get("description", "")).strip_edges()

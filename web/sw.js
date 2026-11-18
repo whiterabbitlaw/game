@@ -1,5 +1,5 @@
 /* 栖云居 PWA：外壳网络优先，避免手机浏览器一直用旧缓存。 */
-const SHELL = "qiyunju-shell-v8";
+const SHELL = "qiyunju-shell-v9";
 const SHELL_URLS = ["./", "./index.html", "./index.js", "./manifest.webmanifest", "./qiyunju_media.js", "./qiyunju_chat.js", "./qiyunju_ime.js", "./qiyunju_files.js", "./pip.html"];
 const NETWORK_FIRST = /(?:\/$|index\.html$|index\.js$|qiyunju_media\.js$|qiyunju_chat\.js$|qiyunju_ime\.js$|qiyunju_files\.js$|sw\.js$|manifest\.webmanifest$|pip(?:\.html)?$)/;
 

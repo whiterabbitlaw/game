@@ -111,12 +111,16 @@ func _collect_entries(src: Dictionary, into: Array) -> void:
 
 
 func _scan_text(history: Array, user_text: String, depth: int) -> String:
+	## 深度仍按最近若干条消息计，但只采用玩家说的内容。
+	## 她自己反复讲的景物不能再把同一条世界书触发回来。
 	var parts: PackedStringArray = []
 	if user_text.strip_edges() != "":
 		parts.append(user_text)
 	var start := maxi(0, history.size() - depth)
-	for i in range(history.size() - 1, start - 1, -1):
+	for i in range(start, history.size()):
 		var m: Dictionary = history[i]
+		if str(m.get("role", "")) != "user":
+			continue
 		parts.append(str(m.get("content", "")))
 	return "\n".join(parts)
 

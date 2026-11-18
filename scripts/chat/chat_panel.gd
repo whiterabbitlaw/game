@@ -26,6 +26,10 @@ var _waiting := false
 var _attachments: Array = []
 var _vision_busy := false
 var _pending_image_name := ""
+var _pending_b64 := ""
+var _pending_mime := "image/jpeg"
+var _vision_question := ""
+var _resight := false
 var _img_btn: Button
 var _attach_lbl: Label
 var _mini := false
@@ -295,6 +299,13 @@ func _send() -> void:
 	if _vision_busy:
 		_set_status("图片还在看。看完，或出现失败提示之后，再发送。")
 		return
+	if not _attachments.is_empty() and _pending_b64 != "" and text.strip_edges() != _vision_question:
+		_vision_question = text.strip_edges()
+		_resight = true
+		_vision_busy = true
+		_set_status("按你这句话再看一次图…")
+		client.vision(_pending_b64, ChatVision.prompt_for(_vision_question), _pending_mime)
+		return
 	if _waiting:
 		return
 	if text == "" and _attachments.is_empty():
@@ -315,6 +326,8 @@ func _send() -> void:
 	_arm_wait_timeout(30.0, "想太久了，请再试一次。")
 	var packed := assembler.assemble(char_id, prior, stored, memory, _note, ChatPromptAssembler.DEFAULT_BUDGET, _attachments)
 	_attachments = []
+	_pending_b64 = ""
+	_resight = false
 	client.chat(packed["messages"])
 
 
@@ -602,6 +615,8 @@ func _bubble(role: String, text: String) -> void:
 func _set_status(t: String) -> void:
 	if status_lbl:
 		status_lbl.text = t
+	if _web_input:
+		_web_input.set_note(t)
 	_sync_pip_status()
 
 
@@ -650,6 +665,8 @@ func _on_extract(ok: bool, facts: Array, _raw: Dictionary) -> void:
 		var shared := kind in ["name", "like", "date"]
 		if f.has("shared"):
 			shared = bool(f.get("shared"))
+		if _is_unasked_prop_fact(f):
+			continue
 		if shared:
 			profile.add_shared_fact(f)
 			if kind == "date" and (str(f.get("text", "")).find("生日") >= 0 or str(f.get("kind_hint", "")) == "birthday"):
@@ -679,6 +696,7 @@ func _on_vision(ok: bool, text: String, _raw: Dictionary) -> void:
 		return
 	_vision_busy = false
 	if not ok or text.strip_edges() == "":
+		_resight = false
 		_attachments = []
 		var fail := ChatVision.explain_vision_error(text)
 		_show_attach(fail)
@@ -687,7 +705,10 @@ func _on_vision(ok: bool, text: String, _raw: Dictionary) -> void:
 	_attachments = [{"kind": "image", "description": text.strip_edges(), "name": _pending_image_name}]
 	var seen := "已看到：%s" % text.strip_edges()
 	_show_attach(seen)
-	_set_status("画面已记下。再问她时会按这些细节回答；描述不对就再发一次图。")
+	_set_status(seen)
+	if _resight:
+		_resight = false
+		_send()
 
 
 func _on_stt(ok: bool, text: String, _raw: Dictionary) -> void:
@@ -716,9 +737,25 @@ func _on_stt(ok: bool, text: String, _raw: Dictionary) -> void:
 
 func _on_pick_failed(message: String) -> void:
 	_vision_busy = false
+	_resight = false
 	_attachments = []
+	_pending_b64 = ""
 	_show_attach(message)
 	_set_status(message)
+
+
+func _is_unasked_prop_fact(fact: Dictionary) -> bool:
+	## 她自己反复讲的向日葵，不是玩家说过的事，就不写进长期记忆。
+	var text := str(fact.get("text", ""))
+	if text.find("向日葵") < 0:
+		return false
+	var kind := str(fact.get("kind", "other"))
+	if kind in ["promise", "name", "date"]:
+		return false
+	for said in memory.all_player_texts():
+		if said.find("向日葵") >= 0:
+			return false
+	return true
 
 
 func _on_file(kind: String, bytes: PackedByteArray, mime: String, name: String) -> void:
@@ -734,12 +771,16 @@ func _on_file(kind: String, bytes: PackedByteArray, mime: String, name: String) 
 		_on_pick_failed(str(prepared.get("error", "这张图打不开。")))
 		return
 	_pending_image_name = name
+	_pending_b64 = str(prepared.get("b64", ""))
+	_pending_mime = str(prepared.get("mime", "image/jpeg"))
+	_vision_question = input.text.strip_edges() if input else ""
+	_resight = false
 	_vision_busy = true
 	_attachments = []
 	var label := name if name != "" else "图片"
 	_show_attach("正在看图：%s。看完之前发送不会带上画面。" % label)
 	_set_status("正在看图：%s" % label)
-	client.vision(str(prepared.get("b64", "")), ChatVision.PROMPT, str(prepared.get("mime", "image/jpeg")))
+	client.vision(_pending_b64, ChatVision.prompt_for(_vision_question), _pending_mime)
 
 
 func _pick_video() -> void:

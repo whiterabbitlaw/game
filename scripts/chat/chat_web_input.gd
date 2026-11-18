@@ -102,6 +102,14 @@ func set_lines(lines: Array) -> void:
 	chat.setLines(JSON.stringify(lines))
 
 
+func set_note(text: String) -> void:
+	if not _js_says_yes("(window.qiyunjuChat&&window.qiyunjuChat.setNote)?'yes':'no'"):
+		return
+	var chat := _chat()
+	if chat:
+		chat.setNote(text)
+
+
 func hide_log() -> void:
 	var chat := _chat()
 	if chat == null:

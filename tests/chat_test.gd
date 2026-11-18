@@ -89,6 +89,28 @@ func _test_lorebook() -> void:
 	for e in tight:
 		tokens += ChatLorebook.estimate_tokens(str(e.get("content", "")))
 	_ok(tokens <= int(lore.book.get("token_budget", 800)) + 80, "budget roughly respected (%d)" % tokens)
+	var claude_book: Dictionary = lore2_card_book()
+	var prop := ChatLorebook.new()
+	prop.load_default()
+	prop.add_character_book(claude_book)
+	var filler: Array = [{"role": "assistant", "content": "向日葵今天也朝着你。笔记我又写了一页。"}]
+	var from_her := prop.scan(filler, "午饭吃什么")
+	var from_her_names := PackedStringArray()
+	for e in from_her:
+		from_her_names.append(str(e.get("name", "")))
+	_ok("向日葵" not in from_her_names, "assistant sunflower filler does not re-trigger lore")
+	var from_player := prop.scan([], "你的向日葵浇了吗")
+	var from_player_names := PackedStringArray()
+	for e2 in from_player:
+		from_player_names.append(str(e2.get("name", "")))
+	_ok("向日葵" in from_player_names, "player mentioning sunflower still triggers")
+
+
+func lore2_card_book() -> Dictionary:
+	var card := ChatPromptAssembler.new().load_card("claude")
+	var data: Dictionary = card.get("data", {})
+	var book: Dictionary = data.get("character_book", {})
+	return book if typeof(book) == TYPE_DICTIONARY else {}
 
 
 func _test_assembler() -> void:
@@ -443,9 +465,9 @@ func _test_voice_p3() -> void:
 	_ok(ChatTextUtil.to_simplified("小雲今日靈田可曾澆過？") == "小云今日灵田可曾浇过？", "traditional to simplified")
 	_ok(ChatTextUtil.to_simplified("你好") == "你好", "already simplified stays")
 	var sw := FileAccess.get_file_as_string("res://web/sw.js")
-	_ok(sw.find("qiyunju-shell-v8") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v8 network-first")
+	_ok(sw.find("qiyunju-shell-v9") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v9 network-first")
 	var chat_js := FileAccess.get_file_as_string("res://web/qiyunju_chat.js")
-	_ok(chat_js.find("chat-10") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0, "build chat-10 sits with the log")
+	_ok(chat_js.find("chat-11") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0 and chat_js.find("setNote") >= 0, "build chat-11 sits with the log")
 	var ime_js := FileAccess.get_file_as_string("res://web/qiyunju_ime.js")
 	_ok(ime_js.find("#fffaf3") >= 0 and ime_js.find("Math.max(36") < 0, "composer uses parchment and the reserved height")
 	var ime_src := FileAccess.get_file_as_string("res://scripts/chat/chat_web_input.gd")
@@ -489,8 +511,12 @@ func _test_vision_and_length() -> void:
 	var blob := JSON.stringify(story.get("messages", []))
 	_ok(blob.find("两到六句") < 0, "story prompt has no hard sentence cap")
 	_ok(blob.find("短回复") < 0, "story prompt does not demand a short reply")
-	_ok(blob.find("八到十二句") >= 0, "story prompt asks for a fuller story")
+	_ok(blob.find("可以提起向日葵") < 0, "claude is not told to bring up sunflowers")
+	_ok(blob.find("现实知识") >= 0 and blob.find("写完整") >= 0, "answers may be practical and complete")
 	_ok(blob.find("没收到画面") >= 0, "image question without a picture must not be faked")
+	var asked := ChatVision.prompt_for("画面上的错误原文是什么？按钮写了什么？")
+	_ok(asked.find("错误原文") >= 0 and asked.length() <= 380, "vision prompt keeps the question under the worker cap (%d)" % asked.length())
+	_ok(ChatVision.prompt_for("").find("没有具体问题") >= 0, "vision without a question still asks for usable detail")
 	var seen := "画面左边是红色方块，右边是蓝色方块，顶上有一条绿色。"
 	var stored := ChatVision.compose_stored("can you understand the image?", [{"kind": "image", "description": seen}])
 	_ok(stored.find("can you understand the image?") >= 0 and stored.find("真正看到的图片") >= 0 and stored.find("红色") >= 0, "stored turn keeps question and vision")
@@ -510,7 +536,8 @@ func _test_vision_and_length() -> void:
 	var back := Image.new()
 	var bytes: PackedByteArray = Marshalls.base64_to_raw(str(prepared.get("b64", "")))
 	_ok(back.load_jpg_from_buffer(bytes) == OK, "prepared jpeg decodes")
-	_ok(back.get_width() <= 1024 and back.get_height() <= 1024, "prepared image is within 1024 (%dx%d)" % [back.get_width(), back.get_height()])
+	_ok(back.get_width() <= 1280 and back.get_height() <= 1280, "prepared image is within 1280 (%dx%d)" % [back.get_width(), back.get_height()])
+	_ok(back.get_width() == 1280, "long edge is kept for readable detail (%d)" % back.get_width())
 	_ok(int(prepared.get("bytes", 0)) < 400000, "prepared payload stays small (%s)" % prepared.get("bytes", 0))
 
 
