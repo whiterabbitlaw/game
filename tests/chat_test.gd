@@ -10,6 +10,7 @@ func _initialize() -> void:
 	_test_lorebook()
 	_test_assembler()
 	_test_memory()
+	_test_memory_p0()
 	_test_anniversary()
 	_test_custom_api()
 	_test_lorebook_st()
@@ -151,7 +152,7 @@ func _test_memory() -> void:
 	mem.add_fact("玩家喜欢桂花糕")
 	_ok(mem.all_player_texts().size() == 1, "records every player message")
 	_ok(mem.all_player_texts()[0].find("桂花糕") >= 0, "player text stored")
-	_ok(mem.facts().size() == 1, "fact stored")
+	_ok(mem.facts().size() >= 1, "fact stored")
 	_ok(mem.first_meet_unix() > 0, "first_meet stamped")
 	# rolling summary hook
 	for i in 24:
@@ -159,13 +160,109 @@ func _test_memory() -> void:
 		mem.append("assistant", "收到 %d" % i)
 	var rolled := mem.maybe_roll_summary()
 	_ok(rolled, "summary hook fired")
-	_ok(mem.summary().strip_edges() != "", "summary filled")
-	_ok(mem.recent(30).size() <= ChatMemory.KEEP_RECENT, "recent window after roll")
+	_ok(mem.summary().strip_edges() != "", "summary filled from whole lines")
+	_ok((mem.data.get("messages", []) as Array).size() == 50, "roll keeps every message")
+	_ok(str((mem.data.get("messages", []) as Array)[0].get("content", "")).find("桂花糕") >= 0, "first line is not truncated")
 	# cleanup
 	var path := "user://chat/_test_chat_mvp.json"
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(OS.get_user_data_dir().path_join("chat/_test_chat_mvp.json"))
 		print("  cleaned test memory file")
+
+
+func _test_memory_p0() -> void:
+	print("== memory p0 ==")
+	var id := "_test_p0_a"
+	var other := "_test_p0_b"
+	_wipe_mem(id)
+	_wipe_mem(other)
+	var mem := ChatMemory.new()
+	mem.open(id)
+	mem.data["messages"] = []
+	mem.data["facts"] = []
+	mem.data["forgotten"] = []
+	mem.data["evidence_summary"] = ""
+	mem.data["legacy_summary"] = ""
+	mem.data["summary"] = "旧摘要里写着玩家喜欢榴莲。"
+	mem.data["summary_kind"] = ""
+	mem.append("user", "我叫小舟。")
+	mem.append("assistant", "玩家喜欢榴莲，我替你记下来了。")
+	mem.append("user", "她说我喜欢榴莲，其实那是她编的。")
+	var long_line := "请记住，这是一整句不会被从中间截断的原话。" + "甲".repeat(180)
+	mem.append("user", long_line)
+	mem.append("user", "我喜欢桂花糕。")
+	mem.append("user", "我不喜欢桂花糕了。")
+	mem.append("user", "我的密码是不要保存。")
+	_ok(mem.active_facts().size() >= 1, "explicit statements become facts")
+	var names := _fact_texts(mem.active_facts())
+	_ok("小舟" in names, "name kept from the player's words")
+	_ok(not _has_substr(names, "榴莲"), "assistant fiction and hearsay are not preferences")
+	_ok(not _has_substr(names, "密码"), "secrets are not stored")
+	_ok(_has_substr(names, "不喜欢桂花糕"), "correction replaces the old like")
+	var still_likes := false
+	for f in mem.active_facts():
+		if str(f.get("kind", "")) == "like" and str(f.get("text", "")).begins_with("喜欢"):
+			still_likes = true
+	_ok(not still_likes, "outdated like is not retrieved as current")
+	var reloaded := ChatMemory.new()
+	reloaded.open(id)
+	_ok(reloaded.all_player_texts().size() == mem.all_player_texts().size(), "reload keeps every player line")
+	_ok(str((reloaded.data.get("messages", []) as Array)[3].get("content", "")) == long_line, "long line survives reload intact")
+	_ok(reloaded.legacy_summary().find("榴莲") >= 0, "old summary is kept but not deleted")
+	_ok(reloaded.summary().find("榴莲") < 0, "legacy summary is not the answer summary")
+	for i in 30:
+		mem.append("user", "后来的闲聊 %d" % i)
+		mem.append("assistant", "嗯 %d" % i)
+	mem.maybe_roll_summary()
+	var again := ChatMemory.new()
+	again.open(id)
+	_ok((again.data.get("messages", []) as Array).size() > ChatMemory.KEEP_RECENT, "long history stays on disk")
+	_ok(str((again.data.get("messages", []) as Array)[0].get("content", "")).find("小舟") >= 0, "time-gap original line is still there")
+	var recalled := again.retrieve("你叫什么，小舟")
+	_ok(_has_substr(_fact_texts(recalled), "小舟"), "name is recalled after a long gap")
+	var cake := again.active_facts()
+	var cake_id := ""
+	for f in cake:
+		if str(f.get("text", "")).find("桂花") >= 0:
+			cake_id = str(f.get("id", ""))
+	_ok(cake_id != "", "corrected food fact exists")
+	_ok(again.delete_fact(cake_id), "delete fact")
+	_ok(not _has_substr(_fact_texts(again.retrieve("桂花糕")), "桂花"), "deleted fact leaves retrieval")
+	_ok(again.summary().find("桂花") < 0, "deleted fact leaves the summary")
+	_ok(str((again.data.get("messages", []) as Array)[4].get("content", "")).find("桂花") >= 0, "original chat line remains")
+	var edited := again.update_fact(str(again.active_facts()[0].get("id", "")), "小舟舟")
+	_ok(str(edited.get("text", "")) == "小舟舟", "edit updates the active fact")
+	_ok(_has_substr(_fact_texts(again.retrieve("小舟")), "小舟舟"), "edit is what retrieval returns")
+	var other_mem := ChatMemory.new()
+	other_mem.open(other)
+	_ok(other_mem.active_facts().is_empty(), "another character does not receive these facts")
+	var unverified := again.accept_extracted({"kind": "like", "text": "喜欢深夜跑步", "keys": ["跑步"], "source": "extract"}, again.all_player_texts())
+	_ok(str(unverified.get("status", "")) == "unverified", "extract without a player quote stays unverified")
+	_ok(not _has_substr(_fact_texts(again.retrieve("跑步")), "跑步"), "unverified extract is not answered from")
+	var legacy := ChatMemory.normalize_fact({"kind": "like", "text": "喜欢红茶", "source": "legacy"})
+	_ok(str(legacy.get("status", "")) == "unverified", "legacy extract without evidence is unverified")
+	_wipe_mem(id)
+	_wipe_mem(other)
+
+
+func _wipe_mem(id: String) -> void:
+	var path := OS.get_user_data_dir().path_join("chat/%s.json" % id)
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(path)
+
+
+func _fact_texts(facts: Array) -> PackedStringArray:
+	var out := PackedStringArray()
+	for f in facts:
+		out.append(str(f.get("text", "")))
+	return out
+
+
+func _has_substr(lines: PackedStringArray, needle: String) -> bool:
+	for line in lines:
+		if line.find(needle) >= 0:
+			return true
+	return false
 
 
 func _test_anniversary() -> void:
@@ -324,7 +421,8 @@ func _test_memory_p2() -> void:
 	_ok(mem.delete_fact(str(mem.facts()[0].get("id", ""))), "delete fact")
 	_ok(mem.facts().size() == 1, "fact removed")
 	mem.apply_llm_summary("你们第一次谈到桂花糕。")
-	_ok(mem.summary().find("桂花糕") >= 0, "llm summary stored")
+	_ok(mem.summary_model().find("桂花糕") >= 0, "llm summary stored aside")
+	_ok(mem.summary().find("桂花糕") < 0, "llm summary does not replace player evidence")
 	_ok(not mem.needs_llm_summary(), "pending flag cleared")
 	var profile := ChatProfile.new()
 	profile.local_path = "user://chat/_test_persona_local.json"
@@ -465,9 +563,9 @@ func _test_voice_p3() -> void:
 	_ok(ChatTextUtil.to_simplified("小雲今日靈田可曾澆過？") == "小云今日灵田可曾浇过？", "traditional to simplified")
 	_ok(ChatTextUtil.to_simplified("你好") == "你好", "already simplified stays")
 	var sw := FileAccess.get_file_as_string("res://web/sw.js")
-	_ok(sw.find("qiyunju-shell-v9") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v9 network-first")
+	_ok(sw.find("qiyunju-shell-v10") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v10 network-first")
 	var chat_js := FileAccess.get_file_as_string("res://web/qiyunju_chat.js")
-	_ok(chat_js.find("chat-11") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0 and chat_js.find("setNote") >= 0, "build chat-11 sits with the log")
+	_ok(chat_js.find("chat-12") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0 and chat_js.find("setNote") >= 0, "build chat-12 sits with the log")
 	var ime_js := FileAccess.get_file_as_string("res://web/qiyunju_ime.js")
 	_ok(ime_js.find("#fffaf3") >= 0 and ime_js.find("Math.max(36") < 0, "composer uses parchment and the reserved height")
 	var ime_src := FileAccess.get_file_as_string("res://scripts/chat/chat_web_input.gd")

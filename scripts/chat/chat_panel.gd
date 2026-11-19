@@ -657,26 +657,14 @@ func _on_extract(ok: bool, facts: Array, _raw: Dictionary) -> void:
 	if not ok:
 		return
 	memory.mark_extracted()
-	var profile := ChatProfile.new()
+	var said := memory.all_player_texts()
 	for f in facts:
 		if typeof(f) != TYPE_DICTIONARY:
 			continue
-		var kind := str(f.get("kind", "other"))
-		var shared := kind in ["name", "like", "date"]
-		if f.has("shared"):
-			shared = bool(f.get("shared"))
 		if _is_unasked_prop_fact(f):
 			continue
-		if shared:
-			profile.add_shared_fact(f)
-			if kind == "date" and (str(f.get("text", "")).find("生日") >= 0 or str(f.get("kind_hint", "")) == "birthday"):
-				profile.apply_birthday(str(f.get("text", "")), str(f.get("date", "")))
-		if not shared or kind == "promise":
-			memory.merge_fact(f)
-		elif kind == "like":
-			var cf: Dictionary = (f as Dictionary).duplicate()
-			cf["scope"] = "char"
-			memory.merge_fact(cf)
+		# 喜好和约定留在眼前这位。只有玩家原话里写明「告诉大家」时，observe_user_line 才会记成共享。
+		memory.accept_extracted(f, said)
 
 
 func _on_vision(ok: bool, text: String, _raw: Dictionary) -> void:

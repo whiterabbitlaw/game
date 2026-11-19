@@ -226,7 +226,7 @@ class _MemoryModule extends ChatModule:
 			parts.append(block)
 		if parts.is_empty():
 			return []
-		return [{"id": "memory", "placement": "system", "content": "\n\n".join(parts)}]
+		return [{"id": "memory", "placement": "post_history", "content": "\n\n".join(parts)}]
 
 
 class _EventsModule extends ChatModule:

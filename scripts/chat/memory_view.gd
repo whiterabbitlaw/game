@@ -9,6 +9,7 @@ var profile := ChatProfile.new()
 var _list: VBoxContainer
 var _add: LineEdit
 var _panel: PanelContainer
+var _editing_id := ""
 var pull_text: Callable
 var push_text: Callable
 
@@ -48,18 +49,25 @@ func setup(mem: ChatMemory) -> void:
 		closed.emit()
 		queue_free())
 	head.add_child(closeb)
-	var hint := UI.lbl("这些只存在这台设备上。共享档案对每位伙伴可见；下面是与眼前这位有关的记忆。摘要不可逐条删除，但清掉事实不影响对话记录。", 18, UI.INK_SOFT)
+	var hint := UI.lbl("这些只存在这台设备上。新的喜好只给眼前这位，除非你写明要告诉大家。标成未核对的旧记录不参与回答。删除事实不会删掉对话原文。", 18, UI.INK_SOFT)
 	hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	hint.custom_minimum_size = Vector2(0, 0)
 	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add_child(hint)
 	if memory and memory.summary().strip_edges() != "":
-		root.add_child(UI.lbl("滚动摘要", 24, UI.INK, true))
+		root.add_child(UI.lbl("较早的原话", 24, UI.INK, true))
 		var sl := UI.lbl(memory.summary(), 20, UI.INK_SOFT)
 		sl.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		sl.custom_minimum_size = Vector2(0, 0)
 		sl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		root.add_child(sl)
+	if memory and memory.legacy_summary().strip_edges() != "":
+		root.add_child(UI.lbl("旧摘要（未逐句核对，不参与回答）", 22, UI.INK, true))
+		var legacy := UI.lbl(memory.legacy_summary(), 18, UI.INK_SOFT)
+		legacy.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+		legacy.custom_minimum_size = Vector2(0, 0)
+		legacy.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		root.add_child(legacy)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -82,6 +90,16 @@ func setup(mem: ChatMemory) -> void:
 	var addb := UI.btn("记下", "jade", 24, Vector2(120, 52))
 	addb.pressed.connect(_on_add)
 	row.add_child(addb)
+	var clearb := UI.btn("清除对话", "ghost", 20, Vector2(140, 48))
+	clearb.pressed.connect(func():
+		if clearb.text != "确认清除对话":
+			clearb.text = "确认清除对话"
+			return
+		if memory:
+			memory.clear_messages()
+		clearb.text = "清除对话"
+		_rebuild())
+	root.add_child(clearb)
 	_rebuild()
 	_fit()
 	if is_inside_tree() and not get_viewport().size_changed.is_connected(_fit):
@@ -91,9 +109,19 @@ func setup(mem: ChatMemory) -> void:
 func _rebuild() -> void:
 	for c in _list.get_children():
 		c.queue_free()
-	_section("共享档案", profile.shared_facts(), true)
+	_section("已有的共享档案", profile.shared_facts(), true)
 	if memory:
-		_section("与她相关", memory.facts(), false)
+		var active: Array = []
+		var unverified: Array = []
+		for f in memory.facts():
+			if str(f.get("status", "")) == "superseded":
+				continue
+			if str(f.get("status", "")) == "unverified":
+				unverified.append(f)
+			else:
+				active.append(f)
+		_section("与她相关", active, false)
+		_section("未核对（不参与回答）", unverified, false)
 
 
 func _section(title: String, facts: Array, shared: bool) -> void:
@@ -107,15 +135,37 @@ func _section(title: String, facts: Array, shared: bool) -> void:
 		var kind := str(f.get("kind", "other"))
 		var labels := {"name": "称呼", "like": "喜好", "date": "日期", "promise": "约定"}
 		var label := str(labels.get(kind, "其它"))
-		var body := UI.lbl("[%s] %s" % [label, str(f.get("text", ""))], 22, UI.INK)
+		var sources := {"user": "原话", "manual": "手动", "extract": "提取", "legacy": "旧档"}
+		var source := str(sources.get(str(f.get("source", "")), str(f.get("source", "旧档"))))
+		var body := UI.lbl("[%s/%s] %s" % [label, source, str(f.get("text", ""))], 22, UI.INK)
 		body.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		body.custom_minimum_size = Vector2(0, 0)
 		row.add_child(body)
-		var del := UI.btn("删除", "ghost", 20, Vector2(90, 44))
 		var fact_id := str(f.get("id", ""))
+		var fact_text := str(f.get("text", ""))
 		var is_shared := shared
+		if not is_shared and str(f.get("status", "")) == "unverified" and memory:
+			var keep := UI.btn("采用", "jade", 18, Vector2(72, 44))
+			keep.pressed.connect(func():
+				memory.update_fact(fact_id, fact_text)
+				_rebuild())
+			row.add_child(keep)
+		if not is_shared and memory:
+			var edit := UI.btn("改", "ghost", 18, Vector2(56, 44))
+			edit.pressed.connect(func():
+				_editing_id = fact_id
+				if _add:
+					_add.text = fact_text
+					_add.placeholder_text = "改完后点记下"
+				if push_text.is_valid():
+					push_text.call(fact_text))
+			row.add_child(edit)
+		var del := UI.btn("删除", "ghost", 18, Vector2(72, 44))
 		del.pressed.connect(func():
+			if del.text != "确认":
+				del.text = "确认"
+				return
 			if is_shared:
 				profile.delete_shared_fact(fact_id)
 			elif memory:
@@ -134,9 +184,14 @@ func _on_add() -> void:
 	if t == "":
 		return
 	_add.text = ""
+	_add.placeholder_text = "手动补一条事实，例如：喜欢桂花糕"
 	if push_text.is_valid():
 		push_text.call("")
-	memory.add_fact(t, "other", [])
+	if _editing_id != "":
+		memory.update_fact(_editing_id, t)
+		_editing_id = ""
+	else:
+		memory.add_fact(t, "other", [])
 	_rebuild()
 
 

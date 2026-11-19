@@ -156,7 +156,7 @@ try {
       ok(state.belowInside, size.name + " tool row still inside the canvas");
       ok(String(state.ime.bg).indexOf("255, 250, 243") >= 0, size.name + " parchment field");
       ok(state.ime.h < 42, size.name + " field is not an inflated slab " + state.ime.h);
-      ok(state.build === "chat-11", size.name + " build");
+      ok(state.build === "chat-12", size.name + " build");
     }
     await shot(cdp, size.name);
   }
