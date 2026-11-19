@@ -366,6 +366,7 @@ static func normalize_fact(raw: Variant) -> Dictionary:
 		"evidence": evidence,
 		"scope": str(raw.get("scope", "char")),
 		"char_id": str(raw.get("char_id", "")),
+		"withheld": bool(raw.get("withheld", false)),
 		"ts": int(raw.get("ts", Time.get_unix_time_from_system())),
 	}
 
@@ -407,11 +408,38 @@ func _split_query(q: String) -> PackedStringArray:
 	return parts
 
 
+func sync_shared(profile: ChatProfile) -> void:
+	for f in facts():
+		if str(f.get("scope", "")) == "shared" and str(f.get("status", "")) == "active" and not bool(f.get("withheld", false)):
+			profile.add_shared_fact(f)
+	for gone in data.get("forgotten", []):
+		for sf in profile.shared_facts():
+			if str(sf.get("text", "")) == str(gone) or str(sf.get("evidence", "")) == str(gone):
+				profile.delete_shared_fact(str(sf.get("id", "")))
+
+
+func answer_memory_question(text: String, shared: Array = []) -> String:
+	## 只接住「我叫什么 / 怎么称呼我」这类记忆问句。其他问题返回空，仍走角色对话。
+	var t := text.strip_edges()
+	if t == "" or not _is_memory_question(t) or _has_unrelated_clause(t):
+		return ""
+	var parts: PackedStringArray = []
+	if _asks_name(t):
+		parts.append(_name_answer(shared))
+	if _asks_like(t):
+		parts.append(_like_answer())
+	return "\n".join(parts)
+
+
 func observe_user_line(text: String) -> void:
 	var t := text.strip_edges()
-	if t == "" or _is_sensitive(t):
+	if t == "" or _is_sensitive(t) or _is_memory_question(t):
 		return
 	var scope := "shared" if _explicit_share(t) else "char"
+	if _is_name_refusal(t):
+		_supersede_active("name", "")
+		_add_withheld(t, scope)
+		return
 	var dislike := _clause_after(t, "我不喜欢")
 	if dislike == "":
 		dislike = _clause_after(t, "我讨厌")
@@ -421,11 +449,19 @@ func observe_user_line(text: String) -> void:
 		return
 	if _quoted_hearsay(t):
 		return
-	var name := _clause_after(t, "我叫")
+	var name := _clause_after(t, "改口叫我")
+	if name == "":
+		name = _clause_after(t, "改叫我")
+	if name == "":
+		name = _clause_after(t, "以后叫我")
 	if name == "":
 		name = _clause_after(t, "我的名字是")
 	if name == "":
 		name = _clause_after(t, "请叫我")
+	if name == "":
+		name = _clause_after(t, "我叫")
+	if _is_question_word(name):
+		name = ""
 	if name != "":
 		_supersede_active("name", "")
 		_add_observed("name", name, t, scope)
@@ -466,6 +502,8 @@ func _add_observed(kind: String, text: String, evidence: String, scope: String) 
 	var clean := text.strip_edges().trim_suffix("了")
 	if clean == "":
 		return
+	_stop_forgetting(clean)
+	_stop_forgetting(evidence)
 	merge_fact({
 		"kind": kind,
 		"text": clean,
@@ -474,6 +512,20 @@ func _add_observed(kind: String, text: String, evidence: String, scope: String) 
 		"status": "active",
 		"evidence": evidence.strip_edges(),
 		"scope": scope,
+		"withheld": false,
+	})
+
+
+func _add_withheld(evidence: String, scope: String) -> void:
+	merge_fact({
+		"kind": "name",
+		"text": "不愿透露",
+		"keys": ["名字"],
+		"source": "user",
+		"status": "active",
+		"evidence": evidence.strip_edges(),
+		"scope": scope,
+		"withheld": true,
 	})
 
 
@@ -496,6 +548,8 @@ func _supersede_active(kind: String, needle: String) -> void:
 
 
 func _fact_answers(f: Dictionary) -> bool:
+	if bool(f.get("withheld", false)):
+		return false
 	if str(f.get("status", "active")) != "active":
 		return false
 	var forgotten: Array = data.get("forgotten", [])
@@ -506,6 +560,17 @@ func _fact_answers(f: Dictionary) -> bool:
 		if s != "" and (s == text or s == evidence):
 			return false
 	return true
+
+
+func _stop_forgetting(text: String) -> void:
+	var s := text.strip_edges()
+	if s == "":
+		return
+	var kept: Array = []
+	for item in data.get("forgotten", []):
+		if str(item).strip_edges() != s:
+			kept.append(item)
+	data["forgotten"] = kept
 
 
 func _remember_forgotten(text: String) -> void:
@@ -570,6 +635,142 @@ func _migrate_loaded() -> void:
 			changed = true
 	if changed:
 		data["facts"] = facts
+
+
+func _is_memory_question(text: String) -> bool:
+	return _asks_name(text) or _asks_like(text)
+
+
+func _asks_name(text: String) -> bool:
+	for key in ["我叫什么", "我叫啥", "我的名字是什么", "我的名字叫什么", "我的名字呢", "怎么称呼我", "如何称呼我", "记得我的名字", "记得我叫什么", "喊我什么", "叫我什么"]:
+		if text.find(key) >= 0:
+			return true
+	return false
+
+
+func _asks_like(text: String) -> bool:
+	return text.find("喜欢什么") >= 0 or text.find("喜欢做什么") >= 0 or text.find("喜欢啥") >= 0
+
+
+func _has_unrelated_clause(text: String) -> bool:
+	var parts := text.replace("？", "，").replace("?", "，").replace("。", "，").replace("！", "，").replace("!", "，").split("，")
+	for part in parts:
+		var clause := str(part).strip_edges()
+		if clause == "" or clause == "吗":
+			continue
+		if _asks_name(clause) or _asks_like(clause):
+			continue
+		if clause in ["你还记得", "还记得", "请问", "那"]:
+			continue
+		return true
+	return false
+
+
+func _is_name_refusal(text: String) -> bool:
+	var bare := text.replace("。", "").replace("！", "").replace("？", "").replace("!", "").replace("?", "").strip_edges()
+	if bare in ["不想告诉你", "先不告诉你", "不告诉你", "不想说"]:
+		return true
+	return text.find("名字") >= 0 and (text.find("不想") >= 0 or text.find("别问") >= 0 or text.find("保密") >= 0 or text.find("不告诉") >= 0)
+
+
+func _is_question_word(name: String) -> bool:
+	return name in ["什么", "啥", "谁", "哪个", "哪位", "吗"]
+
+
+func _name_answer(shared: Array) -> String:
+	if _has_withheld(facts()):
+		return "你跟我说过，先不想告诉我名字。"
+	var fact := _latest_named(facts())
+	if fact.is_empty():
+		fact = _latest_named(shared)
+	if fact.is_empty():
+		return "你还没有告诉我怎么称呼你。"
+	return _cite_name(fact)
+
+
+func _like_answer() -> String:
+	var likes: Array = []
+	var dislikes: Array = []
+	for f in facts():
+		if not _cited_fact(f) or str(f.get("kind", "")) != "like":
+			continue
+		if str(f.get("text", "")).begins_with("不喜欢"):
+			dislikes.append(f)
+		else:
+			likes.append(f)
+	if likes.is_empty() and dislikes.is_empty():
+		return "你还没有告诉我你喜欢什么。"
+	var lines: PackedStringArray = []
+	for f in likes:
+		lines.append(_cite_like(f))
+	for f in dislikes:
+		lines.append(_cite_like(f))
+	return "\n".join(lines)
+
+
+func _cite_name(fact: Dictionary) -> String:
+	var name := str(fact.get("text", "")).strip_edges()
+	var evidence := str(fact.get("evidence", "")).strip_edges()
+	if evidence != "":
+		return "你告诉过我，叫「%s」。原话是：「%s」。" % [name, evidence]
+	return "你在记忆里写下的称呼是「%s」。" % name
+
+
+func _cite_like(fact: Dictionary) -> String:
+	var text := str(fact.get("text", "")).strip_edges()
+	var evidence := str(fact.get("evidence", "")).strip_edges()
+	if evidence != "":
+		return "关于喜好，你说过：「%s」。" % evidence
+	return "关于喜好，记下的是「%s」。" % text
+
+
+func _has_withheld(arr: Array) -> bool:
+	for f in arr:
+		if typeof(f) != TYPE_DICTIONARY:
+			continue
+		var item: Dictionary = f
+		if bool(item.get("withheld", false)) and str(item.get("status", "")) == "active" and str(item.get("kind", "")) == "name":
+			return true
+	return false
+
+
+func _latest_named(arr: Array) -> Dictionary:
+	var best: Dictionary = {}
+	var best_ts := -1
+	for f in arr:
+		if typeof(f) != TYPE_DICTIONARY:
+			continue
+		var item: Dictionary = f
+		if not _cited_fact(item) or str(item.get("kind", "")) != "name" or bool(item.get("withheld", false)):
+			continue
+		var ts := int(item.get("ts", 0))
+		if ts >= best_ts:
+			best = item
+			best_ts = ts
+	return best
+
+
+func _cited_fact(f: Dictionary) -> bool:
+	if str(f.get("status", "")) != "active":
+		return false
+	if bool(f.get("withheld", false)):
+		return false
+	var source := str(f.get("source", ""))
+	if source == "extract" and str(f.get("evidence", "")).strip_edges() == "":
+		return false
+	if source == "legacy":
+		return false
+	return not _matches_forgotten(str(f.get("text", ""))) and not _matches_forgotten(str(f.get("evidence", "")))
+
+
+func _matches_forgotten(text: String) -> bool:
+	var t := text.strip_edges()
+	if t == "":
+		return false
+	for item in data.get("forgotten", []):
+		if str(item).strip_edges() == t:
+			return true
+	return false
 
 
 func _is_sensitive(text: String) -> bool:

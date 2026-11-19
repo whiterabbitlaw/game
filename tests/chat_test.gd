@@ -11,6 +11,7 @@ func _initialize() -> void:
 	_test_assembler()
 	_test_memory()
 	_test_memory_p0()
+	_test_name_question()
 	_test_anniversary()
 	_test_custom_api()
 	_test_lorebook_st()
@@ -241,6 +242,69 @@ func _test_memory_p0() -> void:
 	_ok(not _has_substr(_fact_texts(again.retrieve("跑步")), "跑步"), "unverified extract is not answered from")
 	var legacy := ChatMemory.normalize_fact({"kind": "like", "text": "喜欢红茶", "source": "legacy"})
 	_ok(str(legacy.get("status", "")) == "unverified", "legacy extract without evidence is unverified")
+	_wipe_mem(id)
+	_wipe_mem(other)
+
+
+func _test_name_question() -> void:
+	print("== name question ==")
+	var id := "_test_name_q"
+	var other := "_test_name_q_b"
+	_wipe_mem(id)
+	_wipe_mem(other)
+	var mem := ChatMemory.new()
+	mem.open(id)
+	mem.data["messages"] = []
+	mem.data["facts"] = []
+	mem.data["forgotten"] = []
+	mem.data["evidence_summary"] = ""
+	mem.data["summary_kind"] = "evidence"
+	_ok(mem.answer_memory_question("1公里等于多少米？") == "", "ordinary question is not a memory lookup")
+	_ok(mem.answer_memory_question("我叫什么，另外1公里等于多少米？") == "", "mixed practical question stays with the character")
+	_ok(mem.answer_memory_question("我叫什么").find("还没有") >= 0, "unknown name is stated honestly")
+	mem.append("user", "我叫小舟。")
+	mem.append("assistant", "小舟，你好。")
+	var phrases := ["我叫什么", "怎么称呼我", "你记得我的名字吗", "你还记得我叫什么吗"]
+	for q in phrases:
+		var ans := mem.answer_memory_question(q)
+		_ok(ans.find("小舟") >= 0 and ans.find("我叫小舟") >= 0, "cited name for: " + q)
+	mem.append("user", "请改叫我阿宁。")
+	var renamed := mem.answer_memory_question("我叫什么")
+	_ok(renamed.find("阿宁") >= 0 and renamed.find("小舟") < 0, "rename replaces the cited name")
+	mem.append("user", "不想告诉你")
+	var hidden := mem.answer_memory_question("怎么称呼我")
+	_ok(hidden.find("不想") >= 0 and hidden.find("阿宁") < 0 and hidden.find("小舟") < 0, "refusal removes the old name")
+	var fresh := ChatMemory.new()
+	fresh.open(id)
+	fresh.data["messages"] = []
+	fresh.data["facts"] = []
+	fresh.data["forgotten"] = []
+	fresh.data["evidence_summary"] = ""
+	fresh.append("user", "我叫小舟。")
+	fresh.append("assistant", "小舟这个名字我记下了。")
+	var name_id := ""
+	for f in fresh.facts():
+		if str(f.get("kind", "")) == "name" and str(f.get("text", "")) == "小舟":
+			name_id = str(f.get("id", ""))
+	_ok(fresh.delete_fact(name_id), "delete the name fact")
+	var forgotten_answer := fresh.answer_memory_question("我叫什么")
+	_ok(forgotten_answer.find("小舟") < 0, "deleted name is not answered")
+	_ok(fresh.summary().find("小舟") < 0, "deleted name is not in the summary")
+	_ok(str((fresh.data.get("messages", []) as Array)[0].get("content", "")).find("小舟") >= 0, "original name line stays in the log")
+	var stranger := ChatMemory.new()
+	stranger.open(other)
+	_ok(stranger.answer_memory_question("我叫什么").find("小舟") < 0, "another character is not told the private name")
+	var shared_mem := ChatMemory.new()
+	shared_mem.open(id)
+	shared_mem.append("user", "告诉大家我叫小舟。")
+	var shared: Array = []
+	for f in shared_mem.facts():
+		if str(f.get("scope", "")) == "shared":
+			shared.append(f)
+	_ok(not shared.is_empty(), "explicit share is marked shared")
+	_ok(stranger.answer_memory_question("你记得我的名字吗", shared).find("小舟") >= 0, "shared name is visible to another character")
+	var unverified := stranger.answer_memory_question("我叫什么", [{"kind": "name", "text": "路人", "source": "legacy", "status": "unverified"}])
+	_ok(unverified.find("路人") < 0 and unverified.find("还没有") >= 0, "unverified extract is not repeated as a name")
 	_wipe_mem(id)
 	_wipe_mem(other)
 
@@ -563,9 +627,9 @@ func _test_voice_p3() -> void:
 	_ok(ChatTextUtil.to_simplified("小雲今日靈田可曾澆過？") == "小云今日灵田可曾浇过？", "traditional to simplified")
 	_ok(ChatTextUtil.to_simplified("你好") == "你好", "already simplified stays")
 	var sw := FileAccess.get_file_as_string("res://web/sw.js")
-	_ok(sw.find("qiyunju-shell-v10") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v10 network-first")
+	_ok(sw.find("qiyunju-shell-v11") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v11 network-first")
 	var chat_js := FileAccess.get_file_as_string("res://web/qiyunju_chat.js")
-	_ok(chat_js.find("chat-12") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0 and chat_js.find("setNote") >= 0, "build chat-12 sits with the log")
+	_ok(chat_js.find("chat-13") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0 and chat_js.find("setNote") >= 0, "build chat-13 sits with the log")
 	var ime_js := FileAccess.get_file_as_string("res://web/qiyunju_ime.js")
 	_ok(ime_js.find("#fffaf3") >= 0 and ime_js.find("Math.max(36") < 0, "composer uses parchment and the reserved height")
 	var ime_src := FileAccess.get_file_as_string("res://scripts/chat/chat_web_input.gd")

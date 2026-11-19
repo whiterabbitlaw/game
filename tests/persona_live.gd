@@ -38,8 +38,15 @@ func _initialize() -> void:
 		for _pad in (6 if i == 7 else 0):
 			mem.append("user", "垫一句闲聊 %d" % _pad)
 			mem.append("assistant", "嗯。")
+		var local := mem.answer_memory_question(q)
+		if local != "":
+			mem.append("assistant", local)
+			print("  Q ", q)
+			print("  A ", local.replace("\n", " / "))
+			_ok(local.find("小舟") >= 0, "name question answered from the saved line")
+			_ok(local.find("向日葵") < 0, "memory answer has no sunflower")
+			continue
 		var packed := asm.assemble("claude", mem.recent(16), q, mem, "", 3500, [])
-		var blob := JSON.stringify(packed.get("messages", []))
 		var raw := await _post("/v1/chat", {"messages": packed.get("messages", [])})
 		var text := str(raw.get("text", "")).strip_edges()
 		mem.append("assistant", text)
@@ -49,12 +56,8 @@ func _initialize() -> void:
 		_ok(text.find("向日葵") < 0, "claude turn has no sunflower: " + q.substr(0, 12))
 		if q.find("公里") >= 0:
 			_ok(text.find("一千") >= 0 or text.find("1000") >= 0, "kilometer answered")
-		if q.find("记得") >= 0:
-			_ok(blob.find("小舟") >= 0 and blob.find("雨天走路") >= 0, "name and like are in the prompt")
-			print("  note model name recall: ", text.find("小舟") >= 0)
 		if q.find("态度") >= 0:
-			_ok(blob.find("不喜欢雨天走路") >= 0, "correction is in the prompt")
-			print("  note model correction wording: ", text.find("不喜欢") >= 0)
+			_ok(text.find("不喜欢") >= 0 or text.find("不想") >= 0, "later chat follows the corrected dislike")
 	var others := [
 		["chatgpt", "白龙司书"],
 		["deepseek", "深海女仆"],

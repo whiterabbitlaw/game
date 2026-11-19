@@ -317,6 +317,15 @@ func _send() -> void:
 	_interrupt_speech()
 	memory.append("user", stored)
 	_bubble("user", stored)
+	var profile := ChatProfile.new()
+	memory.sync_shared(profile)
+	var remembered := memory.answer_memory_question(text, profile.shared_facts())
+	if remembered != "":
+		_attachments = []
+		_pending_b64 = ""
+		_resight = false
+		_accept_reply(remembered)
+		return
 	_waiting = true
 	if send_btn:
 		send_btn.disabled = true
@@ -367,6 +376,11 @@ func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
 			else:
 				voice.set_state(ChatVoiceSession.STATE_IDLE)
 		return
+	_accept_reply(text)
+
+
+func _accept_reply(text: String) -> void:
+	_clear_wait()
 	memory.append("assistant", text)
 	_bubble("assistant", text)
 	_set_status("")
