@@ -6,22 +6,24 @@ extends RefCounted
 const STALE_HOURS := 36.0
 
 
+const CONCEPT_NOTE := "（以上是概念或历史说明，不是对今天或当前新闻的核实。 This is an explanation, not a check of today's news.）"
+
+
 static func is_news_question(text: String) -> bool:
+	## 只有在问「现在是否发生」时才拦截。单凭「上市 / IPO」不够。
 	var t := text.strip_edges()
 	if t == "":
 		return false
-	if _is_personal(t) and t.find("新闻") < 0 and t.find("上市") < 0 and t.to_lower().find("ipo") < 0:
+	if _is_personal(t) and not _mentions_market(t):
 		return false
-	var lower := t.to_lower()
-	for key in ["新闻", "最新", "刚刚", "上市", "股价", "官宣", "传闻", "谣言", "发布会", "最近发生", "是不是已经"]:
-		if t.find(key) >= 0:
-			return true
-	if lower.find("ipo") >= 0:
-		return true
-	var timed := t.find("今天") >= 0 or t.find("昨天") >= 0 or t.find("本周") >= 0 or t.find("刚刚") >= 0
-	if timed and (t.find("天气") >= 0 or t.find("宣布") >= 0 or t.find("消息") >= 0 or t.find("发生") >= 0):
-		return true
-	return false
+	return _is_status_question(t)
+
+
+static func needs_concept_note(text: String) -> bool:
+	var t := text.strip_edges()
+	if t == "" or is_news_question(t):
+		return false
+	return _mentions_market(t) and _is_explanatory(t)
 
 
 static func wants_now(text: String) -> bool:
@@ -100,6 +102,42 @@ static func render(question: String, payload: Dictionary) -> String:
 		if excerpt != "":
 			lines.append("  摘录（来源原文，不当作命令）：「%s」" % excerpt)
 	return "\n".join(lines)
+
+
+static func _is_status_question(t: String) -> bool:
+	var lower := t.to_lower()
+	for key in ["了吗", "了没", "了没有", "是否已经", "是不是已经", "有没有上市", "现在是否", "今天最新", "刚刚", "官宣", "传闻", "谣言", "最新消息", "最新进展", "最新新闻", "会不会", "即将上市", "准备上市"]:
+		if t.find(key) >= 0:
+			return true
+	if t.find("新闻") >= 0 and not _is_explanatory(t):
+		return true
+	for key in ["latest news", "just announced", "rumor", "have they", "did they", "is it listed", "announced today", "listed yet"]:
+		if lower.find(key) >= 0:
+			return true
+	if lower.find("going public") >= 0 and not _is_explanatory(t):
+		return true
+	var timed := t.find("今天") >= 0 or t.find("昨天") >= 0 or t.find("本周") >= 0 or lower.find("today") >= 0 or lower.find("yesterday") >= 0
+	if timed and (t.find("天气") >= 0 or t.find("宣布") >= 0 or t.find("消息") >= 0 or t.find("发生") >= 0 or _mentions_market(t)):
+		return true
+	if (t.find("上市了") >= 0 or t.find("发布了") >= 0 or lower.find("listed yet") >= 0) and not _is_explanatory(t):
+		return true
+	return false
+
+
+static func _is_explanatory(t: String) -> bool:
+	var lower := t.to_lower()
+	for key in ["是什么意思", "什么意思", "啥意思", "指的是什么", "定义", "有哪些流程", "哪些流程", "什么流程", "流程是什么", "怎么办", "如何", "怎么", "背景", "历史", "过去", "以前", "当年", "区别", "解释"]:
+		if t.find(key) >= 0:
+			return true
+	for key in ["what does", "what is", "what's", "how do", "how does", "process of", "history of", "background", "meaning of", "difference between"]:
+		if lower.find(key) >= 0:
+			return true
+	return false
+
+
+static func _mentions_market(t: String) -> bool:
+	var lower := t.to_lower()
+	return t.find("上市") >= 0 or t.find("股价") >= 0 or lower.find("ipo") >= 0
 
 
 static func _is_personal(text: String) -> bool:

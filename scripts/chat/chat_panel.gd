@@ -59,6 +59,7 @@ var _ime_submit: Callable
 var _fitting := false
 var _ime_poll := 0.0
 var _last_ime_sig := ""
+var _concept_note := false
 
 
 func open_chat(id: String) -> void:
@@ -330,6 +331,9 @@ func _send() -> void:
 		var news_text := await _answer_news(text)
 		_accept_reply(news_text)
 		return
+	_concept_note = ChatNews.needs_concept_note(text)
+	if _concept_note:
+		stored = stored + "\n\n请只解释概念、流程或历史。不要判断今天或现在某家公司是否已经上市，不要编造来源。"
 	_waiting = true
 	if send_btn:
 		send_btn.disabled = true
@@ -400,6 +404,7 @@ func _arm_wait_timeout(sec: float, msg: String) -> void:
 func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
 	_clear_wait()
 	if not ok or text.strip_edges() == "":
+		_concept_note = false
 		_set_status(text if text.strip_edges() != "" else "她没有说出话。请再试一次。")
 		if voice:
 			if voice.mode == "handsfree":
@@ -412,6 +417,9 @@ func _on_chat(ok: bool, text: String, _raw: Dictionary) -> void:
 
 func _accept_reply(text: String) -> void:
 	_clear_wait()
+	if _concept_note:
+		_concept_note = false
+		text = text.strip_edges() + "\n\n" + ChatNews.CONCEPT_NOTE
 	memory.append("assistant", text)
 	_bubble("assistant", text)
 	_set_status("")

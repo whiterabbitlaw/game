@@ -2,7 +2,7 @@
    活动条拖不动。这一层用浏览器自己的 overflow 滚动，支持滑动和拖动滚动条。 */
 (function (root) {
   "use strict";
-  var BUILD = "chat-14";
+  var BUILD = "chat-15";
   var log = null;
   var scroller = null;
   var bar = null;
