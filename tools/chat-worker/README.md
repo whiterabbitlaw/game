@@ -25,6 +25,7 @@ npx wrangler dev
 | POST | `/v1/chat` | `{ messages, model? }` → `{ text, model }` |
 | POST | `/v1/tts` | `{ text, lang? }` → `{ audio }`（base64 MP3） |
 | POST | `/v1/summarize` | `{ messages }` → `{ text }`，给记忆滚动摘要用 |
+| POST | `/v1/news` | `{ query }` → 时事检索。默认 `enabled: false`。`NEWS_PROVIDER=rss` 只读取 BBC 世界新闻 RSS，问题不会写进对 BBC 的 URL，也不是全网搜索。 |
 
 默认模型是 `@cf/qwen/qwen3-30b-a3b-fp8`（中文相对合适、神经元消耗较低）。可在请求体或 `MODEL` 环境变量里覆盖。
 

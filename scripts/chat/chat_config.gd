@@ -19,6 +19,7 @@ var openai_api_key := ""
 var gemini_model := "gemini-2.5-flash"
 var gemini_api_key := ""
 var worker_model := ""
+var news_auto := true
 
 
 func load_from_disk() -> void:
@@ -53,6 +54,8 @@ func apply_dict(cfg: Dictionary) -> void:
 		worker_model = str(cfg["model"]).strip_edges()
 	if cfg.has("worker_model"):
 		worker_model = str(cfg["worker_model"]).strip_edges()
+	if cfg.has("news_auto"):
+		news_auto = bool(cfg["news_auto"])
 	if cfg.has("gemini_model") and str(cfg["gemini_model"]).strip_edges() != "":
 		gemini_model = str(cfg["gemini_model"]).strip_edges()
 	if cfg.has("gemini_api_key"):
@@ -87,6 +90,7 @@ func to_dict() -> Dictionary:
 		"gemini_model": gemini_model,
 		"gemini_api_key": gemini_api_key,
 		"worker_model": worker_model,
+		"news_auto": news_auto,
 	}
 
 

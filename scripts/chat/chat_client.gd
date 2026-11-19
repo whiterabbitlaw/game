@@ -289,3 +289,41 @@ func _on_done(result: int, code: int, _headers: PackedStringArray, body: PackedB
 		var b64 := str(data.get("audio", ""))
 		var bytes := Marshalls.base64_to_raw(b64) if b64 != "" else PackedByteArray()
 		tts_finished.emit(bytes.size() > 0, bytes)
+
+
+func probe_news() -> Dictionary:
+	reload_config()
+	if cfg.uses_custom_chat():
+		return {"enabled": false, "kind": "none", "reason": "custom_api", "label": "自定义接口"}
+	var result := await _request_json(cfg.worker_path("/health"), HTTPClient.METHOD_GET, "")
+	return ChatNews.capability_from_health(result.get("body", {}), bool(result.get("ok", false)))
+
+
+func query_news(question: String) -> Dictionary:
+	reload_config()
+	var result := await _request_json(cfg.worker_path("/v1/news"), HTTPClient.METHOD_POST, JSON.stringify({"query": question.strip_edges().substr(0, 160)}))
+	if not bool(result.get("ok", false)):
+		return {"enabled": false, "kind": "none", "reason": "endpoint_missing", "items": []}
+	var body: Dictionary = result.get("body", {})
+	body["reason"] = "ok" if bool(body.get("enabled", false)) else "not_configured"
+	return body
+
+
+func _request_json(url: String, method: int, payload: String) -> Dictionary:
+	var http := HTTPRequest.new()
+	http.timeout = 12.0
+	add_child(http)
+	await get_tree().process_frame
+	var headers := PackedStringArray(["Accept: application/json"])
+	if method == HTTPClient.METHOD_POST:
+		headers.append("Content-Type: application/json")
+	var err := http.request(url, headers, method, payload)
+	if err != OK:
+		http.queue_free()
+		return {"ok": false, "body": {}}
+	var done: Array = await http.request_completed
+	http.queue_free()
+	var parsed: Variant = JSON.parse_string((done[3] as PackedByteArray).get_string_from_utf8())
+	var body: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+	var code := int(done[1])
+	return {"ok": int(done[0]) == HTTPRequest.RESULT_SUCCESS and code >= 200 and code < 300, "body": body, "code": code}

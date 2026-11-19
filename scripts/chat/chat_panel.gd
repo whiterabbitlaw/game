@@ -326,6 +326,10 @@ func _send() -> void:
 		_resight = false
 		_accept_reply(remembered)
 		return
+	if ChatNews.is_news_question(text) and _attachments.is_empty():
+		var news_text := await _answer_news(text)
+		_accept_reply(news_text)
+		return
 	_waiting = true
 	if send_btn:
 		send_btn.disabled = true
@@ -338,6 +342,33 @@ func _send() -> void:
 	_pending_b64 = ""
 	_resight = false
 	client.chat(packed["messages"])
+
+
+func _answer_news(question: String) -> String:
+	var cfg := ChatConfig.new()
+	cfg.load_from_disk()
+	if not cfg.news_auto:
+		_set_status("时事检索已关闭")
+		return ChatNews.render(question, {"reason": "off"})
+	if client == null:
+		_set_status("时事检索未接通")
+		return ChatNews.render(question, {"reason": "endpoint_missing"})
+	_set_status("正在确认时事检索是否接通…")
+	var cap: Dictionary = await client.probe_news()
+	if str(cap.get("reason", "")) == "custom_api":
+		_set_status("自定义接口不含时事检索")
+		return ChatNews.render(question, cap)
+	if not bool(cap.get("enabled", false)):
+		_set_status("时事检索未接通")
+		return ChatNews.render(question, cap)
+	_set_status("正在读取公开标题源…")
+	var payload: Dictionary = await client.query_news(question)
+	if not bool(payload.get("enabled", false)):
+		_set_status("时事检索未接通")
+		return ChatNews.render(question, payload)
+	var shown := ChatNews.validate_items(payload.get("items", [])).size()
+	_set_status("标题源返回 %d 条，不是全网搜索" % shown)
+	return ChatNews.render(question, payload)
 
 
 func _clear_wait() -> void:

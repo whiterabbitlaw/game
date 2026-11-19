@@ -14,6 +14,7 @@ var _openai_box: VBoxContainer
 var _gemini_box: VBoxContainer
 var _persona_name: LineEdit
 var _persona_birthday: LineEdit
+var _news_auto: CheckButton
 var profile := ChatProfile.new()
 
 
@@ -65,6 +66,16 @@ func build() -> Control:
 	_gemini_box.add_child(_gemini_key)
 	root.add_child(_gemini_box)
 	_sync_vis()
+	root.add_child(UI.lbl("时事检索", 24, UI.INK, true))
+	var news_hint := UI.lbl("默认会在你问最近的新闻、上市或官宣时，只把这一句发给畅聊服务。不附带记忆、整段聊天或密钥。服务没接通时会直接说不能确认，不会假装查过，也不会编链接。即便接通，目前也只是一份公开标题源，不是全网搜索。", 18, UI.INK_SOFT)
+	news_hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
+	news_hint.custom_minimum_size = Vector2(560, 0)
+	root.add_child(news_hint)
+	_news_auto = CheckButton.new()
+	_news_auto.text = "自动检索时事（服务接通后才发出这一句）"
+	_news_auto.button_pressed = cfg.news_auto
+	_news_auto.add_theme_font_size_override("font_size", 20)
+	root.add_child(_news_auto)
 	root.add_child(UI.lbl("玩家人设（只存在本机）", 24, UI.INK, true))
 	var ph := UI.lbl("生日可填 YYYY-MM-DD 或每年 MM-DD。也可以在畅聊里自然告诉她，抽取后会写进档案。", 18, UI.INK_SOFT)
 	ph.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
@@ -96,6 +107,8 @@ func save() -> void:
 	cfg.openai_api_key = _openai_key.text.strip_edges()
 	cfg.gemini_model = _gemini_model.text.strip_edges()
 	cfg.gemini_api_key = _gemini_key.text.strip_edges()
+	if _news_auto:
+		cfg.news_auto = _news_auto.button_pressed
 	cfg.save()
 	if _persona_name or _persona_birthday:
 		profile.save_persona({

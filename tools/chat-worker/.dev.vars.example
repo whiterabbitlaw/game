@@ -2,3 +2,5 @@
 # GEMINI_API_KEY=
 # CHAT_TOKEN=
 # MODEL=@cf/qwen/qwen3-30b-a3b-fp8
+# 时事。留空则 /v1/news 返回 enabled:false。rss 只拉 BBC 世界新闻 RSS，不是全网搜索。
+# NEWS_PROVIDER=

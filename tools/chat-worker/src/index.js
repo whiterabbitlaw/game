@@ -2,7 +2,9 @@
  * 栖云居畅聊 Worker。默认 Workers AI Qwen + MeloTTS。
  * 不依赖嵌入在公开网页里的 CHAT_TOKEN（那不算保密）。
  * 用 Origin 白名单 + 每 IP 限流保护免费额度。
+ * 时事检索默认关闭。NEWS_PROVIDER=rss 也只是 BBC 标题源，不是全网搜索。
  */
+import { answerNewsRequest, newsCapability } from "./news.mjs";
 
 const DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
 const TTS_MODEL = "@cf/myshell-ai/melotts";
@@ -32,7 +34,8 @@ export default {
       return json(origin, {
         ok: true,
         service: "qiyunju-chat",
-        routes: ["/v1/chat", "/v1/tts", "/v1/summarize", "/v1/memory/extract", "/v1/vision", "/v1/stt"],
+        routes: ["/v1/chat", "/v1/tts", "/v1/summarize", "/v1/memory/extract", "/v1/vision", "/v1/stt", "/v1/news"],
+        news: newsCapability(env),
       });
     }
     if (request.method === "POST") {
@@ -59,6 +62,9 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/stt") {
         return await handleStt(request, env, origin);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/news") {
+        return await handleNews(request, env, origin);
       }
       return json(origin, { error: "not found" }, 404);
     } catch (err) {
@@ -101,6 +107,14 @@ function allowIp(ip) {
   next.push(now);
   hits.set(ip, next);
   return true;
+}
+
+async function handleNews(request, env, origin) {
+  const body = await readJson(request);
+  const query = String(body.query || "").trim();
+  if (!query) return json(origin, { error: "query required", enabled: false }, 400);
+  const result = await answerNewsRequest(env, query);
+  return json(origin, result);
 }
 
 async function handleChat(request, env, origin) {
