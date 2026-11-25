@@ -47,19 +47,70 @@ func shared_facts() -> Array:
 
 
 func add_shared_fact(fact: Dictionary) -> Dictionary:
-	var p := load_profile()
-	var arr: Array = _normalize_facts(p.get("facts", []))
+	return mirror_fact(fact)
+
+
+func mirror_fact(fact: Dictionary) -> Dictionary:
+	## 把一条已经存在的事实抄进公共档案。不改它的钉选含义，只标明范围是共享。
 	var f := ChatMemory.normalize_fact(fact)
 	if f.is_empty():
 		return {}
 	f["scope"] = "shared"
-	for e in arr:
-		if str(e.get("text", "")) == str(f.get("text", "")) and str(e.get("kind", "")) == str(f.get("kind", "")):
-			return e
+	var p := load_profile()
+	var arr: Array = _normalize_facts(p.get("facts", []))
+	for i in arr.size():
+		var e: Dictionary = arr[i]
+		if str(e.get("id", "")) == str(f.get("id", "")) or (str(e.get("text", "")) == str(f.get("text", "")) and str(e.get("kind", "")) == str(f.get("kind", ""))):
+			f["id"] = str(e.get("id", f.get("id", "")))
+			arr[i] = f
+			p["facts"] = arr
+			save_profile(p)
+			return f
 	arr.append(f)
 	p["facts"] = arr
 	save_profile(p)
 	return f
+
+
+func drop_fact(text: String, kind: String) -> void:
+	var p := load_profile()
+	var arr: Array = _normalize_facts(p.get("facts", []))
+	var kept: Array = []
+	for e in arr:
+		if str(e.get("text", "")) == text and str(e.get("kind", "")) == kind:
+			continue
+		kept.append(e)
+	p["facts"] = kept
+	save_profile(p)
+	_make_private_in_saves(text, kind)
+
+
+func _make_private_in_saves(text: String, kind: String) -> void:
+	## 取消共享时只改范围。不删除任何角色的聊天原文，也不改文件名。
+	var dir := DirAccess.open(OS.get_user_data_dir().path_join("chat"))
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var name := dir.get_next()
+	while name != "":
+		if not dir.current_is_dir() and name.ends_with(".json") and name != "profile.json" and name != "persona_local.json":
+			var path := "user://chat/%s" % name
+			var data := _load_json(path)
+			var facts: Array = data.get("facts", [])
+			var changed := false
+			for i in facts.size():
+				if typeof(facts[i]) != TYPE_DICTIONARY:
+					continue
+				var e: Dictionary = facts[i]
+				if str(e.get("text", "")) == text and str(e.get("kind", "")) == kind and str(e.get("scope", "")) == "shared":
+					e["scope"] = "char"
+					facts[i] = e
+					changed = true
+			if changed:
+				data["facts"] = facts
+				_save_json(path, data)
+		name = dir.get_next()
+	dir.list_dir_end()
 
 
 func delete_shared_fact(fact_id: String) -> bool:

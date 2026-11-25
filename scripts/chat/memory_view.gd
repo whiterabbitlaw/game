@@ -10,6 +10,9 @@ var _list: VBoxContainer
 var _add: LineEdit
 var _panel: PanelContainer
 var _editing_id := ""
+var _editing_shared := false
+var _editing_text := ""
+var _editing_kind := "other"
 var pull_text: Callable
 var push_text: Callable
 
@@ -49,7 +52,7 @@ func setup(mem: ChatMemory) -> void:
 		closed.emit()
 		queue_free())
 	head.add_child(closeb)
-	var hint := UI.lbl("这些只存在这台设备上。新的喜好只给眼前这位，除非你写明要告诉大家。标成未核对的旧记录不参与回答。删除事实不会删掉对话原文。", 18, UI.INK_SOFT)
+	var hint := UI.lbl("这些只存在这台设备上。钉选表示这条已经确认，有关的问题会优先带上，不会因此告诉其他伙伴。要大家都能用，请另外点「告诉大家」。未核对的不参与回答。删除或改正不会清掉对话原文。", 18, UI.INK_SOFT)
 	hint.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 	hint.custom_minimum_size = Vector2(0, 0)
 	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -109,18 +112,20 @@ func setup(mem: ChatMemory) -> void:
 func _rebuild() -> void:
 	for c in _list.get_children():
 		c.queue_free()
-	_section("已有的共享档案", profile.shared_facts(), true)
+	_section("告诉大家的自设", profile.shared_facts(), true)
 	if memory:
 		var active: Array = []
 		var unverified: Array = []
 		for f in memory.facts():
 			if str(f.get("status", "")) == "superseded":
 				continue
+			if str(f.get("scope", "")) == "shared":
+				continue
 			if str(f.get("status", "")) == "unverified":
 				unverified.append(f)
 			else:
 				active.append(f)
-		_section("与她相关", active, false)
+		_section("只给她的事", active, false)
 		_section("未核对（不参与回答）", unverified, false)
 
 
@@ -130,49 +135,75 @@ func _section(title: String, facts: Array, shared: bool) -> void:
 		_list.add_child(UI.lbl("（还没有）", 20, UI.INK_SOFT))
 		return
 	for f in facts:
-		var row := HBoxContainer.new()
-		row.add_theme_constant_override("separation", 8)
+		var block := VBoxContainer.new()
+		block.add_theme_constant_override("separation", 6)
+		block.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var kind := str(f.get("kind", "other"))
 		var labels := {"name": "称呼", "like": "喜好", "date": "日期", "promise": "约定"}
 		var label := str(labels.get(kind, "其它"))
 		var sources := {"user": "原话", "manual": "手动", "extract": "提取", "legacy": "旧档"}
 		var source := str(sources.get(str(f.get("source", "")), str(f.get("source", "旧档"))))
-		var body := UI.lbl("[%s/%s] %s" % [label, source, str(f.get("text", ""))], 22, UI.INK)
+		var pin := "已钉选" if bool(f.get("pinned", false)) else "未钉选"
+		var scope := "大家" if shared or str(f.get("scope", "")) == "shared" else "只给她"
+		var body := UI.lbl("[%s/%s/%s/%s] %s" % [label, source, pin, scope, str(f.get("text", ""))], 22, UI.INK)
 		body.autowrap_mode = TextServer.AUTOWRAP_ARBITRARY
 		body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		body.custom_minimum_size = Vector2(0, 0)
-		row.add_child(body)
+		block.add_child(body)
+		var row := HFlowContainer.new()
+		row.add_theme_constant_override("h_separation", 8)
+		row.add_theme_constant_override("v_separation", 6)
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var fact_id := str(f.get("id", ""))
 		var fact_text := str(f.get("text", ""))
+		var fact_kind := kind
 		var is_shared := shared
-		if not is_shared and str(f.get("status", "")) == "unverified" and memory:
+		var pinned := bool(f.get("pinned", false))
+		var unverified := str(f.get("status", "")) == "unverified"
+		if not is_shared and unverified and memory:
 			var keep := UI.btn("采用", "jade", 18, Vector2(72, 44))
 			keep.pressed.connect(func():
 				memory.update_fact(fact_id, fact_text)
 				_rebuild())
 			row.add_child(keep)
-		if not is_shared and memory:
-			var edit := UI.btn("改", "ghost", 18, Vector2(56, 44))
-			edit.pressed.connect(func():
-				_editing_id = fact_id
-				if _add:
-					_add.text = fact_text
-					_add.placeholder_text = "改完后点记下"
-				if push_text.is_valid():
-					push_text.call(fact_text))
-			row.add_child(edit)
+		if not unverified:
+			var pin_b := UI.btn("取消钉选" if pinned else "钉选", "ghost", 18, Vector2(110, 44))
+			pin_b.pressed.connect(func():
+				_toggle_pin(fact_id, fact_text, fact_kind, is_shared, not pinned)
+				_rebuild())
+			row.add_child(pin_b)
+			var share_b := UI.btn("仅她" if is_shared else "告诉大家", "ghost", 18, Vector2(120, 44))
+			share_b.pressed.connect(func():
+				_toggle_share(fact_id, fact_text, fact_kind, not is_shared)
+				_rebuild())
+			row.add_child(share_b)
+		var edit := UI.btn("改", "ghost", 18, Vector2(56, 44))
+		edit.pressed.connect(func():
+			_editing_id = fact_id
+			_editing_shared = is_shared
+			_editing_text = fact_text
+			_editing_kind = fact_kind
+			if _add:
+				_add.text = fact_text
+				_add.placeholder_text = "改完后点记下"
+			if push_text.is_valid():
+				push_text.call(fact_text))
+		row.add_child(edit)
 		var del := UI.btn("删除", "ghost", 18, Vector2(72, 44))
 		del.pressed.connect(func():
 			if del.text != "确认":
 				del.text = "确认"
 				return
 			if is_shared:
-				profile.delete_shared_fact(fact_id)
+				profile.drop_fact(fact_text, fact_kind)
+				if memory:
+					memory.suppress_text(fact_text)
 			elif memory:
 				memory.delete_fact(fact_id)
 			_rebuild())
 		row.add_child(del)
-		_list.add_child(row)
+		block.add_child(row)
+		_list.add_child(block)
 
 
 func _on_add() -> void:
@@ -188,11 +219,61 @@ func _on_add() -> void:
 	if push_text.is_valid():
 		push_text.call("")
 	if _editing_id != "":
-		memory.update_fact(_editing_id, t)
+		var local_id := _local_id(_editing_id, _editing_text, _editing_kind)
+		if local_id == "":
+			var created := memory.add_fact(t, _editing_kind, [])
+			local_id = str(created.get("id", ""))
+		else:
+			memory.update_fact(local_id, t)
+		if _editing_shared and local_id != "":
+			profile.drop_fact(_editing_text, _editing_kind)
+			memory.set_shared(local_id, true, profile)
 		_editing_id = ""
+		_editing_shared = false
+		_editing_text = ""
 	else:
 		memory.add_fact(t, "other", [])
 	_rebuild()
+
+
+func _toggle_pin(fact_id: String, fact_text: String, fact_kind: String, shared: bool, pinned: bool) -> void:
+	if memory == null:
+		return
+	var local_id := _local_id(fact_id, fact_text, fact_kind)
+	if local_id != "":
+		memory.set_pinned(local_id, pinned, profile)
+		return
+	if shared:
+		for f in profile.shared_facts():
+			if str(f.get("text", "")) == fact_text and str(f.get("kind", "")) == fact_kind:
+				f["pinned"] = pinned
+				profile.mirror_fact(f)
+				return
+
+
+func _toggle_share(fact_id: String, fact_text: String, fact_kind: String, shared: bool) -> void:
+	if memory == null:
+		return
+	var local_id := _local_id(fact_id, fact_text, fact_kind)
+	if local_id == "":
+		var created := memory.add_fact(fact_text, fact_kind, [])
+		local_id = str(created.get("id", ""))
+	if local_id == "":
+		return
+	memory.set_shared(local_id, shared, profile)
+
+
+func _local_id(fact_id: String, fact_text: String, fact_kind: String) -> String:
+	if memory == null:
+		return ""
+	for f in memory.facts():
+		if str(f.get("status", "")) == "superseded":
+			continue
+		if str(f.get("id", "")) == fact_id:
+			return fact_id
+		if str(f.get("text", "")) == fact_text and str(f.get("kind", "")) == fact_kind:
+			return str(f.get("id", ""))
+	return ""
 
 
 func _fit() -> void:

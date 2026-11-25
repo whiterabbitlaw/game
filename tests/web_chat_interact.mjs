@@ -108,7 +108,7 @@ try {
     await sleep(1000);
   }
   console.log("state", JSON.stringify(state));
-  ok(state && state.build === "chat-15", "visible build chat-15");
+  ok(state && state.build === "chat-16", "visible build chat-16");
   ok(state && state.badge && state.badge.y > state.badge.shellTop + 40 && state.badge.y < state.badge.shellBottom + 2, "build id sits in the log footer, not on the title");
   ok(state && state.ime && state.log && state.log.y + state.log.h <= state.ime.y + 2, "history ends above the composer");
   ok(state && state.ime && state.ime.h <= 40, "composer is not an oversized slab " + (state && state.ime && state.ime.h));
