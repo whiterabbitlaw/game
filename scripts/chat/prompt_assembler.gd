@@ -93,7 +93,10 @@ func assemble(char_id: String, history: Array, user_text: String, memory: ChatMe
 		var role := str(m.get("role", "user"))
 		if role != "user" and role != "assistant" and role != "system":
 			role = "assistant"
-		messages.append({"role": role, "content": str(m.get("content", ""))})
+		var content := str(m.get("content", ""))
+		if memory != null and role == "user":
+			content = memory.model_user_line(content)
+		messages.append({"role": role, "content": content})
 	if post != "":
 		messages.append({"role": "system", "content": post})
 	messages.append({"role": "user", "content": user_text})

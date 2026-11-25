@@ -6,7 +6,10 @@
  */
 import { answerNewsRequest, newsCapability } from "./news.mjs";
 
-const DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
+// qwen3-30b-a3b-fp8 was deprecated by Cloudflare on 2026-11-20 (error 5028).
+// Production still answers a request that includes `model`. This default applies
+// only after the worker source is deployed; this change does not deploy it.
+const DEFAULT_MODEL = "@cf/qwen/qwen3.8-27b";
 const TTS_MODEL = "@cf/myshell-ai/melotts";
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 const STT_MODEL = "@cf/openai/whisper-large-v3-turbo";

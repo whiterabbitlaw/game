@@ -47,22 +47,11 @@ func scan(history: Array, user_text: String = "", scan_depth_override: int = -1)
 	var budget := int(book.get("token_budget", 800))
 	for b in extra_books:
 		budget += int(b.get("token_budget", 0))
-	var recurse := bool(book.get("recursive_scanning", true))
 	var hay := _scan_text(history, user_text, depth)
 	var activated: Array = []
 	var seen: Dictionary = {}
-	_activate_into(entries, hay, activated, seen)
-	if recurse:
-		var guard := 0
-		while guard < 3:
-			guard += 1
-			var before := activated.size()
-			var extra_hay := hay
-			for e in activated:
-				extra_hay += "\n" + str(e.get("content", ""))
-			_activate_into(entries, extra_hay, activated, seen)
-			if activated.size() == before:
-				break
+	## 只按玩家的话触发。世界书正文不再拿回去二次触发，避免条目互相叫醒。
+	_activate_into(entries, hay, activated, seen, user_text)
 	return _apply_budget(activated, budget)
 
 
@@ -125,20 +114,21 @@ func _scan_text(history: Array, user_text: String, depth: int) -> String:
 	return "\n".join(parts)
 
 
-func _activate_into(entries: Array, hay: String, activated: Array, seen: Dictionary) -> void:
+func _activate_into(entries: Array, hay: String, activated: Array, seen: Dictionary, current: String) -> void:
 	var hay_l := hay.to_lower()
+	var now := current.strip_edges()
+	var now_l := now.to_lower()
 	for e in entries:
 		var key := _entry_id(e)
 		if seen.has(key):
 			continue
-		if bool(e.get("constant", false)):
-			if _passes_probability(e):
-				seen[key] = true
-				activated.append(e)
+		var hit := bool(e.get("constant", false)) or _keys_match(e, hay, hay_l)
+		if not hit or not _passes_probability(e):
 			continue
-		if _keys_match(e, hay, hay_l) and _passes_probability(e):
-			seen[key] = true
-			activated.append(e)
+		var copy: Dictionary = e.duplicate(true)
+		copy["_match_now"] = now != "" and (bool(e.get("constant", false)) == false) and _keys_match(e, now, now_l)
+		seen[key] = true
+		activated.append(copy)
 
 
 func _passes_probability(e: Dictionary) -> bool:
@@ -239,6 +229,10 @@ func _apply_budget(activated: Array, budget: int) -> Array:
 		return activated
 	var ranked: Array = activated.duplicate()
 	ranked.sort_custom(func(a, b):
+		var am := 1 if bool(a.get("_match_now", false)) else 0
+		var bm := 1 if bool(b.get("_match_now", false)) else 0
+		if am != bm:
+			return am > bm
 		var pw := int(a.get("priority", 100)) - int(b.get("priority", 100))
 		if pw != 0:
 			return int(a.get("priority", 100)) > int(b.get("priority", 100))
@@ -246,10 +240,16 @@ func _apply_budget(activated: Array, budget: int) -> Array:
 	)
 	var kept: Array = []
 	var used := 0
+	var seen_body := {}
 	for e in ranked:
-		var cost := estimate_tokens(str(e.get("content", "")))
+		var body := str(e.get("content", "")).strip_edges()
+		if body != "" and seen_body.has(body):
+			continue
+		var cost := estimate_tokens(body)
 		if kept.is_empty() or used + cost <= budget:
 			kept.append(e)
+			if body != "":
+				seen_body[body] = true
 			used += cost
 	return kept
 

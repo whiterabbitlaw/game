@@ -47,19 +47,46 @@ func shared_facts() -> Array:
 
 
 func add_shared_fact(fact: Dictionary) -> Dictionary:
-	var p := load_profile()
-	var arr: Array = _normalize_facts(p.get("facts", []))
+	return mirror_fact(fact)
+
+
+func mirror_fact(fact: Dictionary) -> Dictionary:
+	## 把一条已经存在的事实抄进公共档案。不改它的钉选含义，只标明范围是共享。
 	var f := ChatMemory.normalize_fact(fact)
 	if f.is_empty():
 		return {}
 	f["scope"] = "shared"
-	for e in arr:
-		if str(e.get("text", "")) == str(f.get("text", "")) and str(e.get("kind", "")) == str(f.get("kind", "")):
-			return e
+	var p := load_profile()
+	var arr: Array = _normalize_facts(p.get("facts", []))
+	for i in arr.size():
+		var e: Dictionary = arr[i]
+		if str(e.get("id", "")) == str(f.get("id", "")) or (str(e.get("text", "")) == str(f.get("text", "")) and str(e.get("kind", "")) == str(f.get("kind", ""))):
+			f["id"] = str(e.get("id", f.get("id", "")))
+			arr[i] = f
+			p["facts"] = arr
+			save_profile(p)
+			return f
 	arr.append(f)
 	p["facts"] = arr
 	save_profile(p)
 	return f
+
+
+func remove_shared(text: String, kind: String) -> void:
+	## 只从公共档案拿走。派生副本由各自的记忆文件失效，不在这里改成私有。
+	var p := load_profile()
+	var arr: Array = _normalize_facts(p.get("facts", []))
+	var kept: Array = []
+	for e in arr:
+		if str(e.get("text", "")) == text and str(e.get("kind", "")) == kind:
+			continue
+		kept.append(e)
+	p["facts"] = kept
+	save_profile(p)
+
+
+func drop_fact(text: String, kind: String) -> void:
+	remove_shared(text, kind)
 
 
 func delete_shared_fact(fact_id: String) -> bool:
