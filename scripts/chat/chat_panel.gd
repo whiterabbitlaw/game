@@ -80,6 +80,7 @@ func open_chat(id: String) -> void:
 	_build()
 	_hydrate()
 	_maybe_phone_compact()
+	_publish_web_hits.call_deferred()
 
 
 func _build() -> void:
@@ -135,6 +136,7 @@ func _build() -> void:
 	setb.pressed.connect(_open_settings)
 	actions.add_child(setb)
 	var memb := _flex_btn("记忆", "ghost")
+	memb.set_meta("hit", "memory")
 	memb.pressed.connect(_open_memory)
 	actions.add_child(memb)
 	var minib := _flex_btn("小窗", "ghost")
@@ -320,6 +322,7 @@ func _send() -> void:
 	_bubble("user", stored)
 	var profile := ChatProfile.new()
 	memory.sync_shared(profile)
+	memory.adopt_public(profile)
 	var remembered := memory.answer_memory_question(text, profile.shared_facts())
 	if remembered != "":
 		_attachments = []
@@ -1177,6 +1180,28 @@ func _on_ime_inset(px: float) -> void:
 		return
 	_keyboard_inset = px
 	_fit_panel()
+
+
+func _publish_web_hits() -> void:
+	if not OS.has_feature("web"):
+		return
+	var hits := {}
+	_collect_hits(self, hits)
+	JavaScriptBridge.eval("window.qiyunjuViewport = {w:720,h:1280}; window.qiyunjuHits = %s;" % JSON.stringify(hits), true)
+
+
+func _collect_hits(node: Node, hits: Dictionary) -> void:
+	if node is Control and str(node.get_meta("hit", "")) != "":
+		var c := node as Control
+		var xf := c.get_global_transform_with_canvas()
+		var origin := xf.origin
+		var scale := xf.get_scale()
+		var w := c.size.x * scale.x
+		var h := c.size.y * scale.y
+		if w > 2.0 and h > 2.0 and origin.y >= 0.0:
+			hits[str(node.get_meta("hit"))] = {"x": origin.x, "y": origin.y, "w": w, "h": h}
+	for child in node.get_children():
+		_collect_hits(child, hits)
 
 
 func _on_memory_closed() -> void:

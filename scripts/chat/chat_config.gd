@@ -4,6 +4,7 @@ extends RefCounted
 
 const PATH := "user://chat_config.json"
 const DEFAULT_WORKER_URL := "https://qiyunju-chat.whiterabbitlaw.workers.dev"
+const DEFAULT_WORKER_MODEL := "@cf/qwen/qwen3.8-27b"
 
 const PROVIDER_WORKER := "worker"
 const PROVIDER_OPENAI := "openai"
@@ -94,6 +95,14 @@ func to_dict() -> Dictionary:
 	}
 
 
+func effective_worker_model() -> String:
+	## 空配置和已停用的默认模型都改走当前还能调用的型号。不改用户另选的模型，也不写密钥。
+	var chosen := worker_model.strip_edges()
+	if chosen == "" or chosen == "@cf/qwen/qwen3-30b-a3b-fp8":
+		return DEFAULT_WORKER_MODEL
+	return chosen
+
+
 func uses_custom_chat() -> bool:
 	if provider == PROVIDER_OPENAI:
 		return openai_api_key != "" and openai_base_url != ""
@@ -173,9 +182,7 @@ func plan_chat(messages: Array) -> Dictionary:
 			"headers": PackedStringArray(["Content-Type: application/json", "Accept: application/json"]),
 			"body": body,
 		}
-	var body2 := {"messages": messages}
-	if worker_model != "":
-		body2["model"] = worker_model
+	var body2 := {"messages": messages, "model": effective_worker_model()}
 	return {
 		"kind": PROVIDER_WORKER,
 		"url": worker_chat_url(),

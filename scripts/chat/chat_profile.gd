@@ -72,7 +72,8 @@ func mirror_fact(fact: Dictionary) -> Dictionary:
 	return f
 
 
-func drop_fact(text: String, kind: String) -> void:
+func remove_shared(text: String, kind: String) -> void:
+	## 只从公共档案拿走。派生副本由各自的记忆文件失效，不在这里改成私有。
 	var p := load_profile()
 	var arr: Array = _normalize_facts(p.get("facts", []))
 	var kept: Array = []
@@ -82,35 +83,10 @@ func drop_fact(text: String, kind: String) -> void:
 		kept.append(e)
 	p["facts"] = kept
 	save_profile(p)
-	_make_private_in_saves(text, kind)
 
 
-func _make_private_in_saves(text: String, kind: String) -> void:
-	## 取消共享时只改范围。不删除任何角色的聊天原文，也不改文件名。
-	var dir := DirAccess.open(OS.get_user_data_dir().path_join("chat"))
-	if dir == null:
-		return
-	dir.list_dir_begin()
-	var name := dir.get_next()
-	while name != "":
-		if not dir.current_is_dir() and name.ends_with(".json") and name != "profile.json" and name != "persona_local.json":
-			var path := "user://chat/%s" % name
-			var data := _load_json(path)
-			var facts: Array = data.get("facts", [])
-			var changed := false
-			for i in facts.size():
-				if typeof(facts[i]) != TYPE_DICTIONARY:
-					continue
-				var e: Dictionary = facts[i]
-				if str(e.get("text", "")) == text and str(e.get("kind", "")) == kind and str(e.get("scope", "")) == "shared":
-					e["scope"] = "char"
-					facts[i] = e
-					changed = true
-			if changed:
-				data["facts"] = facts
-				_save_json(path, data)
-		name = dir.get_next()
-	dir.list_dir_end()
+func drop_fact(text: String, kind: String) -> void:
+	remove_shared(text, kind)
 
 
 func delete_shared_fact(fact_id: String) -> bool:

@@ -13,6 +13,8 @@ func _initialize() -> void:
 	_test_memory_p0()
 	_test_name_question()
 	_test_memory_layers()
+	_test_share_copies()
+	_test_nine_long()
 	_test_news()
 	_test_anniversary()
 	_test_custom_api()
@@ -311,6 +313,180 @@ func _test_name_question() -> void:
 	_wipe_mem(other)
 
 
+func _test_share_copies() -> void:
+	print("== shared copies ==")
+	var a_id := "_test_share_a"
+	var b_id := "_test_share_b"
+	var c_id := "_test_share_c"
+	_wipe_mem(a_id)
+	_wipe_mem(b_id)
+	_wipe_mem(c_id)
+	var profile := ChatProfile.new()
+	profile.profile_path = "user://chat/_test_share_profile.json"
+	var a := ChatMemory.new()
+	a.open(a_id)
+	a.append("user", "我喜欢桂花糕。")
+	var like_id := ""
+	for f in a.facts():
+		if str(f.get("text", "")).find("桂花糕") >= 0:
+			like_id = str(f.get("id", ""))
+	_ok(like_id != "", "A stored the spoken preference")
+	a.set_shared(like_id, true, profile)
+	var b := ChatMemory.new()
+	b.open(b_id)
+	b.append("user", "我喜欢红茶。")
+	b.append("assistant", "第二位的原话还在。")
+	b.adopt_public(profile)
+	var derived := false
+	var tea := false
+	for f in b.active_facts():
+		if str(f.get("text", "")).find("桂花糕") >= 0 and str(f.get("provenance", "")) == "shared":
+			derived = true
+		if str(f.get("text", "")).find("红茶") >= 0 and str(f.get("provenance", "")) == "spoken":
+			tea = true
+	_ok(derived, "B receives a derived copy on reopen")
+	_ok(tea, "B keeps the preference she heard herself")
+	_ok(b.answer_memory_question("你还记得桂花糕吗").find("桂花糕") >= 0, "B recalls the shared fact")
+	b.merge_fact({"kind": "like", "text": "喜欢雨声", "source": "manual", "provenance": "legacy", "scope": "char", "status": "active"})
+	a.set_shared(like_id, false, profile)
+	var b2 := ChatMemory.new()
+	b2.open(b_id)
+	b2.adopt_public(profile)
+	var derived_live := false
+	var tea_live := false
+	var rain_live := false
+	for f in b2.facts():
+		if str(f.get("text", "")).find("桂花糕") >= 0 and str(f.get("status", "")) == "active":
+			derived_live = true
+		if str(f.get("text", "")).find("红茶") >= 0 and str(f.get("status", "")) == "active":
+			tea_live = true
+		if str(f.get("text", "")).find("雨声") >= 0 and str(f.get("status", "")) == "active":
+			rain_live = true
+	_ok(not derived_live, "unshare removes the derived copy instead of keeping it private")
+	_ok(tea_live, "unshare keeps an independent spoken fact")
+	_ok(rain_live, "unshare keeps a legacy private fact")
+	_ok(str((b2.data.get("messages", []) as Array)[1].get("content", "")) == "第二位的原话还在。", "unshare does not delete B's log")
+	_ok(b2.answer_memory_question("你还记得桂花糕吗").find("桂花糕") < 0, "B no longer answers the unshared fact")
+	var revived := b2.accept_extracted({"kind": "like", "text": "喜欢桂花糕", "keys": ["桂花糕"], "source": "extract"}, b2.all_player_texts())
+	_ok(str(revived.get("status", "")) != "active", "extract does not revive the unshared fact")
+	b2.maybe_roll_summary()
+	_ok(b2.summary().find("桂花糕") < 0, "summary rebuild does not restore the unshared fact")
+	a.set_shared(like_id, true, profile)
+	a.publish_edit(like_id, "喜欢红豆糕", profile)
+	b2.adopt_public(profile)
+	var edited := b2.answer_memory_question("你还记得红豆糕吗")
+	_ok(edited.find("红豆糕") >= 0 and edited.find("桂花糕") < 0, "editing the public fact updates B's copy")
+	a.retract_public("喜欢红豆糕", "like", profile)
+	var b3 := ChatMemory.new()
+	b3.open(b_id)
+	b3.adopt_public(profile)
+	var red_live := false
+	for f in b3.active_facts():
+		if str(f.get("text", "")).find("红豆糕") >= 0:
+			red_live = true
+	_ok(not red_live and b3.answer_memory_question("你还记得红豆糕吗").find("红豆糕") < 0, "deleting the public fact drops derived copies")
+	_ok(b3.answer_memory_question("你还记得红茶吗").find("红茶") >= 0, "B's own fact still answers after the public delete")
+	var before_forget := (b3.data.get("messages", []) as Array).size()
+	b3.forget_everywhere("喜欢红茶", "like", profile)
+	var b4 := ChatMemory.new()
+	b4.open(b_id)
+	_ok(b4.answer_memory_question("你还记得红茶吗").find("红茶") < 0, "global forget stops every character from recalling it")
+	_ok((b4.data.get("messages", []) as Array).size() == before_forget, "global forget keeps the chat log")
+	var raw_path := OS.get_user_data_dir().path_join("chat/%s.json" % c_id)
+	var raw := FileAccess.open(raw_path, FileAccess.WRITE)
+	raw.store_string(JSON.stringify({
+		"char_id": c_id,
+		"messages": [{"id": "m", "role": "user", "content": "只是闲聊。", "ts": 3}],
+		"facts": [
+			{"id": "copied", "kind": "like", "text": "喜欢桂花糕", "keys": ["桂花糕"], "source": "user", "status": "active", "evidence": "我喜欢桂花糕。", "scope": "shared"},
+			{"id": "own", "kind": "like", "text": "喜欢雨声", "source": "manual", "status": "active", "evidence": "", "scope": "char"},
+		],
+	}))
+	raw.close()
+	var c := ChatMemory.new()
+	c.open(c_id)
+	var copied_prov := ""
+	var own_prov := ""
+	for f in c.facts():
+		if str(f.get("id", "")) == "copied":
+			copied_prov = str(f.get("provenance", ""))
+		if str(f.get("text", "")).find("雨声") >= 0:
+			own_prov = str(f.get("provenance", ""))
+	_ok(copied_prov == "shared", "old shared copy without provenance is marked derived")
+	_ok(own_prov == "manual", "old private record without a public source is kept")
+	c.adopt_public(profile)
+	var copied_active := false
+	var own_active := false
+	for f in c.facts():
+		if str(f.get("id", "")) == "copied" and str(f.get("status", "")) == "active":
+			copied_active = true
+		if str(f.get("text", "")).find("雨声") >= 0 and str(f.get("status", "")) == "active":
+			own_active = true
+	_ok(not copied_active, "orphan derived copy is suppressed when the public fact is gone")
+	_ok(own_active, "migration does not delete the independent private fact")
+	_ok(str((c.data.get("messages", []) as Array)[0].get("content", "")) == "只是闲聊。", "migration keeps the original line")
+	_wipe_mem(a_id)
+	_wipe_mem(b_id)
+	_wipe_mem(c_id)
+	var profile_file := OS.get_user_data_dir().path_join("chat/_test_share_profile.json")
+	if FileAccess.file_exists(profile_file):
+		DirAccess.remove_absolute(profile_file)
+
+
+func _test_nine_long() -> void:
+	print("== nine long ==")
+	var ids := Data.char_ids()
+	var asm := ChatPromptAssembler.new()
+	var voices := {}
+	for id in ids:
+		var data: Dictionary = asm.load_card(str(id)).get("data", {})
+		voices[str(id)] = str(data.get("personality", "")).substr(0, 6)
+	var seen := {}
+	for id in ids:
+		var sig := str(voices[str(id)])
+		_ok(sig != "" and not seen.has(sig), "personality signature is unique for " + str(id))
+		seen[sig] = true
+		var packed := asm.assemble(str(id), [], "今天天气怎么样，跟我讲讲实际的安排")
+		var sys := ""
+		for m in packed.get("messages", []):
+			sys += str(m.get("content", ""))
+		_ok(sys.find(sig) >= 0, str(id) + " prompt still carries her own personality")
+		var name := str(asm.load_card(str(id)).get("data", {}).get("name", ""))
+		_ok(name != "" and sys.find(name) >= 0, str(id) + " prompt names her")
+		for other in ids:
+			if str(other) == str(id):
+				continue
+			_ok(sys.find(str(voices[str(other)])) < 0, str(id) + " prompt does not use " + str(other) + "'s personality")
+	var id := "_test_nine_long"
+	_wipe_mem(id)
+	var mem := ChatMemory.new()
+	mem.open(id)
+	mem.append("user", "我叫小舟。")
+	for f in mem.facts():
+		if str(f.get("kind", "")) == "name":
+			mem.set_pinned(str(f.get("id", "")), true)
+	for i in 36:
+		mem.append("user", "后来闲聊 %d，只是天气和路程。" % i)
+		mem.append("assistant", "嗯 %d" % i)
+	_ok(mem.answer_memory_question("我叫什么").find("小舟") >= 0, "name still answers after a long log")
+	var packed_long := asm.assemble("claude", mem.recent(40), "我叫什么", mem, "", 900)
+	var blob := ""
+	for m in packed_long.get("messages", []):
+		blob += str(m.get("content", ""))
+	_ok(blob.find("小舟") >= 0, "pinned name is still in the prompt after history is trimmed")
+	_ok(int(packed_long["meta"]["history_kept"]) < (mem.data.get("messages", []) as Array).size(), "long history is trimmed")
+	mem.append("user", "请改叫我阿宁。")
+	_ok(mem.answer_memory_question("我叫什么").find("阿宁") >= 0 and mem.answer_memory_question("我叫什么").find("小舟") < 0, "a later correction wins over the earlier name")
+	var pending := mem.accept_extracted({"kind": "like", "text": "喜欢夜跑", "keys": ["夜跑"], "source": "extract"}, PackedStringArray())
+	_ok(str(pending.get("status", "")) == "unverified", "unconfirmed extract stays unconfirmed in a long log")
+	_ok(mem.answer_memory_question("你还记得夜跑吗") == "", "unconfirmed extract is not recalled")
+	var other := ChatMemory.new()
+	other.open("_test_nine_other")
+	_ok(other.answer_memory_question("我叫什么").find("阿宁") < 0, "another character does not inherit the private name")
+	_wipe_mem(id)
+	_wipe_mem("_test_nine_other")
+
+
 func _test_news() -> void:
 	print("== news ==")
 	_ok(not ChatNews.is_news_question("今天午饭吃什么比较好？"), "lunch is not a news lookup")
@@ -450,20 +626,8 @@ func _test_memory_layers() -> void:
 			still_shared = str(f.get("scope", "")) == "shared"
 			got_pin = bool(f.get("pinned", false))
 	_ok(still_shared and got_pin, "pinning a shared fact does not change its scope")
-	var shared_text := str(shared.get("text", ""))
-	var shared_kind := str(shared.get("kind", ""))
-	stranger.merge_fact({"kind": shared_kind, "text": shared_text, "source": "user", "status": "active", "scope": "shared", "evidence": "第二位也听过。"})
-	stranger.append("assistant", "第二位的原话还在。")
 	mem.set_shared(str(shared.get("id", "")), false, profile)
 	_ok(profile.shared_facts().is_empty(), "unshare removes it from the public profile")
-	var stranger_again := ChatMemory.new()
-	stranger_again.open(other)
-	var stranger_scope := ""
-	for f in stranger_again.facts():
-		if str(f.get("text", "")) == shared_text:
-			stranger_scope = str(f.get("scope", ""))
-	_ok(stranger_scope == "char", "unshare makes the other character's copy private")
-	_ok(str((stranger_again.data.get("messages", []) as Array)[0].get("content", "")) == "第二位的原话还在。", "unshare does not delete the other log")
 	var refused := ChatMemory.new()
 	refused.open(id)
 	_ok(refused.all_player_texts().size() == mem.all_player_texts().size(), "reload keeps the log")
@@ -548,6 +712,11 @@ func _test_custom_api() -> void:
 	var hdrs: PackedStringArray = plan.get("headers", PackedStringArray())
 	var joined := " ".join(hdrs)
 	_ok(joined.find("Bearer") < 0, "worker plan has no bearer key")
+	_ok(str(plan["body"].get("model", "")) == ChatConfig.DEFAULT_WORKER_MODEL, "worker plan sends the current default model")
+	cfg.worker_model = "@cf/qwen/qwen3-30b-a3b-fp8"
+	var retired := cfg.plan_chat([{"role": "user", "content": "你好"}])
+	_ok(str(retired["body"].get("model", "")) == ChatConfig.DEFAULT_WORKER_MODEL, "retired qwen id is not sent")
+	cfg.worker_model = ""
 	# openai compatible
 	cfg.provider = ChatConfig.PROVIDER_OPENAI
 	cfg.openai_base_url = "https://example.com/v1"
@@ -821,9 +990,9 @@ func _test_voice_p3() -> void:
 	_ok(ChatTextUtil.to_simplified("小雲今日靈田可曾澆過？") == "小云今日灵田可曾浇过？", "traditional to simplified")
 	_ok(ChatTextUtil.to_simplified("你好") == "你好", "already simplified stays")
 	var sw := FileAccess.get_file_as_string("res://web/sw.js")
-	_ok(sw.find("qiyunju-shell-v14") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v12 network-first")
+	_ok(sw.find("qiyunju-shell-v15") >= 0 and sw.find("qiyunju_chat.js") >= 0 and sw.find("qiyunju_ime.js") >= 0 and sw.find("NETWORK_FIRST") >= 0, "sw cache v12 network-first")
 	var chat_js := FileAccess.get_file_as_string("res://web/qiyunju_chat.js")
-	_ok(chat_js.find("chat-16") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0 and chat_js.find("setNote") >= 0, "build chat-16 sits with the log")
+	_ok(chat_js.find("chat-17") >= 0 and chat_js.find("qiyunju-log") >= 0 and chat_js.find("pan-y") >= 0 and chat_js.find("setNote") >= 0, "build chat-17 sits with the log")
 	var ime_js := FileAccess.get_file_as_string("res://web/qiyunju_ime.js")
 	_ok(ime_js.find("#fffaf3") >= 0 and ime_js.find("Math.max(36") < 0, "composer uses parchment and the reserved height")
 	var ime_src := FileAccess.get_file_as_string("res://scripts/chat/chat_web_input.gd")

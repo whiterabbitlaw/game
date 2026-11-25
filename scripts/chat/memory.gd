@@ -6,7 +6,7 @@ extends RefCounted
 
 const DIR := "user://chat"
 const BACKUP_DIR := "user://chat/backup"
-const SCHEMA := 2
+const SCHEMA := 3
 const SUMMARIZE_AFTER := 24
 const KEEP_RECENT := 12
 const FACT_BUDGET := 400
@@ -112,6 +112,7 @@ func add_fact(text: String, kind: String = "other", keys: Array = []) -> Diction
 		"text": text,
 		"keys": keys,
 		"source": "manual",
+		"provenance": "manual",
 		"scope": "char",
 	})
 
@@ -228,15 +229,108 @@ func set_pinned(fact_id: String, pinned: bool, profile: ChatProfile = null) -> D
 
 
 func set_shared(fact_id: String, shared: bool, profile: ChatProfile) -> Dictionary:
-	## 共享要另一次明确选择。取消共享时从公共档案拿掉，原话和钉选都留着。
+	## 共享要另一次明确选择。取消共享只收回派生副本，不把它们改成对方的私有记忆。
 	var updated := _mutate_fact(fact_id, {"scope": "shared" if shared else "char"})
 	if updated.is_empty():
 		return {}
+	if str(updated.get("provenance", "")) == "":
+		updated = _mutate_fact(fact_id, {"provenance": "manual"})
 	if shared:
 		profile.mirror_fact(updated)
 	else:
-		profile.drop_fact(str(updated.get("text", "")), str(updated.get("kind", "")))
+		profile.remove_shared(str(updated.get("text", "")), str(updated.get("kind", "")))
+		apply_public(str(updated.get("text", "")), str(updated.get("kind", "")), "unshare")
+		_visit_other_saves(str(updated.get("text", "")), str(updated.get("kind", "")), "unshare")
+	return _find_fact(fact_id)
+
+
+func publish_edit(fact_id: String, text: String, profile: ChatProfile) -> Dictionary:
+	var old := _find_fact(fact_id)
+	var updated := update_fact(fact_id, text)
+	if updated.is_empty() or old.is_empty():
+		return updated
+	var old_text := str(old.get("text", ""))
+	var kind := str(updated.get("kind", ""))
+	if str(old.get("scope", "")) == "shared" or str(old.get("provenance", "")) == "shared":
+		profile.remove_shared(old_text, kind)
+		if str(updated.get("scope", "")) == "shared" or str(updated.get("provenance", "")) == "shared":
+			profile.mirror_fact(updated)
+		apply_public(old_text, kind, "edit", str(updated.get("text", "")))
+		_visit_other_saves(old_text, kind, "edit", str(updated.get("text", "")))
 	return updated
+
+
+func retract_public(text: String, kind: String, profile: ChatProfile) -> void:
+	## 删除公共来源，并让派生副本失效。有独立原话的私有事实留下来。
+	profile.remove_shared(text, kind)
+	apply_public(text, kind, "delete")
+	_visit_other_saves(text, kind, "delete")
+
+
+func delete_public(fact_id: String, profile: ChatProfile) -> void:
+	var old := _find_fact(fact_id)
+	if old.is_empty():
+		return
+	var text := str(old.get("text", ""))
+	var kind := str(old.get("kind", ""))
+	profile.remove_shared(text, kind)
+	delete_fact(fact_id)
+	apply_public(text, kind, "delete")
+	_visit_other_saves(text, kind, "delete")
+
+
+func forget_everywhere(text: String, kind: String, profile: ChatProfile) -> void:
+	## 玩家明确要求所有角色都不再引用。聊天原文不删。
+	profile.remove_shared(text, kind)
+	apply_public(text, kind, "forget_all")
+	_visit_other_saves(text, kind, "forget_all")
+
+
+func adopt_public(profile: ChatProfile) -> void:
+	## 把仍公开的事实收成派生副本。公共来源没了，派生副本就失效，独立原话留下。
+	var public_facts := profile.shared_facts()
+	var arr: Array = facts()
+	var changed := false
+	for i in arr.size():
+		var e: Dictionary = arr[i]
+		if str(e.get("provenance", "")) != "shared" or str(e.get("status", "")) != "active":
+			continue
+		if _public_has(public_facts, e):
+			continue
+		var text := str(e.get("text", ""))
+		var kind := str(e.get("kind", ""))
+		e["status"] = "superseded"
+		if not _has_independent(text, kind):
+			_remember_forgotten(text)
+			_remember_forgotten(str(e.get("evidence", "")))
+		arr[i] = e
+		changed = true
+	data["facts"] = arr
+	for pf in public_facts:
+		if typeof(pf) != TYPE_DICTIONARY:
+			continue
+		var pub: Dictionary = pf
+		var text := str(pub.get("text", "")).strip_edges()
+		var kind := str(pub.get("kind", ""))
+		if text == "" or _has_independent(text, kind) or _has_active_derived(pub):
+			continue
+		_append_fact({
+			"kind": kind,
+			"text": text,
+			"keys": pub.get("keys", []),
+			"source": "shared",
+			"status": "active",
+			"evidence": str(pub.get("evidence", "")),
+			"scope": "char",
+			"provenance": "shared",
+			"shared_id": str(pub.get("id", "")),
+			"pinned": false,
+			"withheld": false,
+		})
+		changed = true
+	if changed:
+		data["evidence_summary"] = _build_evidence_summary(data.get("messages", []))
+		_save()
 
 
 func clear_messages() -> void:
@@ -435,6 +529,8 @@ static func normalize_fact(raw: Variant) -> Dictionary:
 		"char_id": str(raw.get("char_id", "")),
 		"withheld": bool(raw.get("withheld", false)),
 		"pinned": bool(raw.get("pinned", false)),
+		"provenance": _provenance_of(raw, source),
+		"shared_id": str(raw.get("shared_id", "")),
 		"ts": int(raw.get("ts", Time.get_unix_time_from_system())),
 	}
 
@@ -601,6 +697,7 @@ func _add_observed(kind: String, text: String, evidence: String, scope: String) 
 		"status": "active",
 		"evidence": evidence.strip_edges(),
 		"scope": scope,
+		"provenance": "spoken",
 		"withheld": false,
 	})
 
@@ -709,6 +806,7 @@ func _migrate_loaded() -> void:
 		data["pending_summary_messages"] = []
 	if str(data.get("evidence_summary", "")) == "" and not (data.get("messages", []) as Array).is_empty():
 		data["evidence_summary"] = _build_evidence_summary(data.get("messages", []))
+	_label_provenance()
 	if int(data.get("schema", 0)) < SCHEMA:
 		_backup_once()
 		data["schema"] = SCHEMA
@@ -905,6 +1003,188 @@ func _mutate_fact(fact_id: String, fields: Dictionary) -> Dictionary:
 	data["facts"] = arr
 	_save()
 	return updated
+
+
+func apply_public(old_text: String, kind: String, mode: String, new_text: String = "") -> void:
+	var independent := _has_independent(old_text, kind)
+	var arr: Array = facts()
+	var changed := false
+	for i in arr.size():
+		var e: Dictionary = arr[i]
+		if str(e.get("text", "")).strip_edges() != old_text or str(e.get("kind", "")) != kind:
+			continue
+		if str(e.get("status", "")) == "superseded":
+			continue
+		var prov := str(e.get("provenance", ""))
+		if mode == "unshare":
+			if prov == "shared":
+				e["status"] = "superseded"
+				if not independent:
+					_remember_forgotten(old_text)
+					_remember_forgotten(str(e.get("evidence", "")))
+				changed = true
+			elif str(e.get("scope", "")) == "shared":
+				e["scope"] = "char"
+				changed = true
+		elif mode == "delete":
+			if prov == "shared" or str(e.get("scope", "")) == "shared":
+				e["status"] = "superseded"
+				e["scope"] = "char"
+				changed = true
+		elif mode == "edit":
+			if prov == "shared" or str(e.get("scope", "")) == "shared":
+				e["text"] = new_text
+				e["keys"] = _auto_keys(new_text)
+				_stop_forgetting(new_text)
+				if not independent:
+					_remember_forgotten(old_text)
+				changed = true
+		elif mode == "forget_all":
+			e["status"] = "superseded"
+			_remember_forgotten(old_text)
+			_remember_forgotten(str(e.get("evidence", "")))
+			changed = true
+		arr[i] = e
+	if mode == "delete" and not _has_independent(old_text, kind):
+		_remember_forgotten(old_text)
+		changed = true
+	if changed:
+		data["facts"] = arr
+		data["evidence_summary"] = _build_evidence_summary(data.get("messages", []))
+		_save()
+
+
+func _visit_other_saves(old_text: String, kind: String, mode: String, new_text: String = "") -> void:
+	var dir := DirAccess.open(_abs_dir())
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var name := dir.get_next()
+	while name != "":
+		if not dir.current_is_dir() and name.ends_with(".json"):
+			var id := name.trim_suffix(".json")
+			if id != char_id and id != "profile" and id != "persona_local":
+				var path := DIR + "/%s" % name
+				var raw := _read_json(path)
+				if raw.has("messages"):
+					var other := ChatMemory.new()
+					other.open(id)
+					other.apply_public(old_text, kind, mode, new_text)
+		name = dir.get_next()
+	dir.list_dir_end()
+
+
+func _read_json(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return {}
+	return parsed
+
+
+func _find_fact(fact_id: String) -> Dictionary:
+	for f in facts():
+		if str(f.get("id", "")) == fact_id:
+			return f
+	return {}
+
+
+func _append_fact(fact: Dictionary) -> Dictionary:
+	var f := normalize_fact(fact)
+	if f.is_empty():
+		return {}
+	var arr: Array = facts()
+	arr.append(f)
+	data["facts"] = arr
+	_save()
+	return f
+
+
+func _has_independent(text: String, kind: String) -> bool:
+	for f in facts():
+		if str(f.get("status", "")) != "active":
+			continue
+		if str(f.get("text", "")).strip_edges() != text or str(f.get("kind", "")) != kind:
+			continue
+		if str(f.get("provenance", "")) in ["spoken", "manual", "legacy"]:
+			return true
+	return false
+
+
+func _has_active_derived(pub: Dictionary) -> bool:
+	var text := str(pub.get("text", "")).strip_edges()
+	var kind := str(pub.get("kind", ""))
+	var sid := str(pub.get("id", ""))
+	for f in facts():
+		if str(f.get("status", "")) != "active" or str(f.get("provenance", "")) != "shared":
+			continue
+		if sid != "" and str(f.get("shared_id", "")) == sid:
+			return true
+		if str(f.get("text", "")).strip_edges() == text and str(f.get("kind", "")) == kind:
+			return true
+	return false
+
+
+func _public_has(public_facts: Array, fact: Dictionary) -> bool:
+	var text := str(fact.get("text", "")).strip_edges()
+	var kind := str(fact.get("kind", ""))
+	var sid := str(fact.get("shared_id", ""))
+	for pf in public_facts:
+		if typeof(pf) != TYPE_DICTIONARY:
+			continue
+		var pub: Dictionary = pf
+		if sid != "" and str(pub.get("id", "")) == sid:
+			return true
+		if str(pub.get("text", "")).strip_edges() == text and str(pub.get("kind", "")) == kind:
+			return true
+	return false
+
+
+func _label_provenance() -> void:
+	var facts: Array = data.get("facts", [])
+	var changed := false
+	for i in facts.size():
+		if typeof(facts[i]) != TYPE_DICTIONARY:
+			continue
+		var f: Dictionary = facts[i]
+		if str(f.get("provenance", "")) in ["spoken", "manual", "shared", "legacy"]:
+			continue
+		var evidence := str(f.get("evidence", "")).strip_edges()
+		var source := str(f.get("source", ""))
+		if evidence != "" and _text_in_user_log(evidence):
+			f["provenance"] = "spoken"
+		elif source == "manual":
+			f["provenance"] = "manual"
+		elif str(f.get("scope", "")) == "shared" or evidence != "":
+			f["provenance"] = "shared"
+		else:
+			f["provenance"] = "legacy"
+		facts[i] = f
+		changed = true
+	if changed:
+		data["facts"] = facts
+
+
+func _text_in_user_log(text: String) -> bool:
+	var needle := text.strip_edges()
+	if needle == "":
+		return false
+	for m in data.get("messages", []):
+		if str(m.get("role", "")) != "user":
+			continue
+		if str(m.get("content", "")).find(needle) >= 0:
+			return true
+	return false
+
+
+static func _provenance_of(raw: Dictionary, source: String) -> String:
+	var p := str(raw.get("provenance", "")).strip_edges()
+	if p in ["spoken", "manual", "shared", "legacy"]:
+		return p
+	if source == "shared":
+		return "shared"
+	return ""
 
 
 func _backup_once() -> void:
